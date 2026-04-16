@@ -1,0 +1,38 @@
+# Enforce LF line endings on files that must work as Unix scripts.
+# Without this, git on Windows can convert them to CRLF on checkout and
+# break `bash install.sh` on macOS/Linux with a cryptic "command not found"
+# or "bad interpreter: /bin/bash^M" error.
+
+# Shell scripts — always LF
+*.sh text eol=lf
+
+# Lua scripts — REAPER accepts either, but Lua sources should be consistent
+*.lua text eol=lf
+
+# Python — always LF
+*.py text eol=lf
+
+# Config files that get read by shell tools
+.env.example text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Markdown + JSON — accept either, default to LF for consistency
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Windows-only batch — always CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary formats — never touch
+*.db binary
+*.mid binary
+*.wav binary
+*.mp3 binary
+*.png binary
+*.jpg binary
+*.ico binary

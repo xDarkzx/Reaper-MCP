@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Claude
+.claude/
+.mcp.json
+
+# Composition scratchwork
+compose_*.py
+mix_*.py
+
+# Secrets — never commit API keys
+Groq_API.md
+*.api_key
+.env
+.env.*
+
+# Large local asset folders (user's MIDI, datasets, renders)
+Midi_References/
+datasets/
+midi_output/
+librescore_midi/
+dl-librescore/
+
+# Local screenshots and scratch files (root-level only)
+/Screenshot*.png
+/_*.json
+/_*.txt
+/_*.py
+/*.mid
+/*.musicxml
+
+# Any sibling archive / scratch folders kept locally (root-level only)
+/_archive*/
+/Composer-Engine-Archive/
