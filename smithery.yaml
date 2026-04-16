@@ -1,0 +1,44 @@
+# Smithery registration for ReaperMCP — https://smithery.ai/docs
+#
+# ReaperMCP is a stdio MCP server that talks to REAPER (the DAW) through a
+# Lua script running inside REAPER. Because it drives a locally-installed
+# desktop application, users must install ReaperMCP on their own machine
+# and load `reaper_mcp_server.lua` in REAPER — Smithery hosts the listing
+# and configuration UI, not a running instance.
+#
+# Install instructions: https://github.com/xDarkzx/Reaper-MCP#quick-start
+
+startCommand:
+  type: stdio
+
+  configSchema:
+    type: object
+    properties:
+      profile:
+        type: string
+        title: "Tool profile"
+        description: >-
+          Trim the 147-tool surface to fit under LLM tool-count limits
+          (Groq Llama 3 caps at 128; Claude Haiku and many local models are
+          lower). Choose `full` on frontier models. See
+          https://github.com/xDarkzx/Reaper-MCP/blob/main/docs/TOOLS.md#tool-profiles
+        enum:
+          - full
+          - composition
+          - mixing
+          - analysis
+          - minimal
+        default: full
+    required: []
+
+  commandFunction: |-
+    (config) => ({
+      command: 'reaper-mcp',
+      args: [],
+      env: (config.profile && config.profile !== 'full')
+        ? { REAPER_MCP_PROFILE: config.profile }
+        : {}
+    })
+
+  exampleConfig:
+    profile: full
