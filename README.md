@@ -135,6 +135,29 @@ Open your AI client and start talking:
 
 > See **[docs/TOOLS.md](docs/TOOLS.md)** for the complete tool reference with every signature and a one-line description for each tool.
 
+### Tool profiles
+
+The default 147-tool surface is designed for full-featured frontier models. Smaller/cheaper models (Groq Llama 3 caps at 128 tools, some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's server config to pick a workflow-specific subset:
+
+| Profile | Tools | For |
+|---------|------:|-----|
+| `full` *(default)* | ~147 | Frontier models — Claude, GPT-4, Gemini |
+| `composition` | ~104 | Writing / editing music |
+| `mixing` | ~67 | Mixing, mastering, bus pipelines |
+| `analysis` | ~47 | Inspect + measure only |
+| `minimal` | ~40 | Smoke test / basic control |
+
+```json
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "reaper-mcp",
+      "env": { "REAPER_MCP_PROFILE": "mixing" }
+    }
+  }
+}
+```
+
 ### Mixing & Mastering Pipelines
 
 25 professional style profiles drive automatic EQ, compression, reverb buses, sidechain pumping, and mastering — each tuned to industry-standard LUFS targets and character.

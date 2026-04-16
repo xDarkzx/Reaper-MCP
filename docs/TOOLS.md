@@ -4,6 +4,43 @@ Complete reference for every MCP tool exposed by ReaperMCP — **147 tools acros
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
+> **Too many tools for your model?** Some LLMs cap the tool surface (Groq Llama 3 = 128, Claude Haiku + some local models have lower ceilings). Set the `REAPER_MCP_PROFILE` environment variable to trim the surface to a workflow-specific subset. See [Tool profiles](#tool-profiles) below.
+
+## Tool profiles
+
+Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register only a subset of modules. Default is `full` (everything).
+
+| Profile | Modules | Approx. tools | Use when |
+|---------|--------:|--------------:|----------|
+| `full` | 22 | 147 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 13 | ~104 | Writing or editing music. Drops FX, mix, sidechain, analysis. |
+| `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
+| `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
+| `minimal` | 3 | ~40 | Smoke test / basic control surface. |
+
+**How to set it — Claude Desktop / Cursor / any MCP client with env support:**
+
+```json
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "reaper-mcp",
+      "env": {
+        "REAPER_MCP_PROFILE": "mixing"
+      }
+    }
+  }
+}
+```
+
+**From a shell:**
+
+```bash
+REAPER_MCP_PROFILE=composition reaper-mcp
+```
+
+On startup the server writes a banner to stderr confirming the active profile and module count. An invalid profile name logs a warning and falls back to `full`.
+
 ---
 
 ## Quick index

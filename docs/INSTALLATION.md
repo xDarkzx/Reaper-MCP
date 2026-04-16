@@ -167,6 +167,29 @@ Or create `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for g
 
 ReaperMCP uses **stdio transport**. Point any MCP-compatible client at the `reaper-mcp` command.
 
+### Reducing the tool surface for smaller models
+
+ReaperMCP exposes 147 tools by default. Smaller or cheaper LLMs (Groq Llama 3 caps at 128, Claude Haiku and some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's `env` block to register only a workflow-specific subset:
+
+| Profile | Tools | For |
+|---------|------:|-----|
+| `full` *(default)* | ~147 | Claude, GPT-4, Gemini-class models |
+| `composition` | ~104 | Writing / editing music |
+| `mixing` | ~67 | Mixing, mastering, bus pipelines |
+| `analysis` | ~47 | Inspect + measure only |
+| `minimal` | ~40 | Smoke test / basic control |
+
+```json
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "reaper-mcp",
+      "env": { "REAPER_MCP_PROFILE": "mixing" }
+    }
+  }
+}
+```
+
 ---
 
 ## Verify It Works

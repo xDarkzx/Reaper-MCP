@@ -6,6 +6,7 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **Tool profiles** via `REAPER_MCP_PROFILE` env var — trim the 147-tool surface down to a workflow-specific subset so it fits under LLM tool-count limits (Groq Llama 3 = 128, smaller models lower). Profiles: `full` (default, ~147), `composition` (~104), `mixing` (~67), `analysis` (~47), `minimal` (~40). Invalid values log a warning and fall back to `full`. Startup banner writes the active profile and module count to stderr.
 - **Audio analysis tools** (`analysis_tools.py`, 4 tools) — objective mix metrics from a rendered WAV, designed to pair with `project_export_audio` + `engine_master` for a `measure → correct` loop:
   - `analyze_loudness(wav_path, reference)` — integrated LUFS (pyloudnorm), true peak, RMS, crest factor, delta against streaming / broadcast / cinema / club targets.
   - `analyze_clipping(wav_path, threshold_db)` — per-channel and total sample-clip counts at a configurable threshold.
