@@ -35,6 +35,11 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
 ]
+analysis = [
+    "numpy>=1.24",
+    "soundfile>=0.12",
+    "pyloudnorm>=0.1.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["reaper_mcp", "reaper_mcp_shared"]

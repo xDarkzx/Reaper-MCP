@@ -23,7 +23,7 @@
 
 ---
 
-ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **143 tools across 21 modules** — transport, tracks, MIDI, FX, envelopes, sidechain, mixing, mastering, and bus pipelines. Talk to your AI assistant and it composes, mixes, and masters music in real-time — the AI chooses every note, rhythm, and CC itself.
+ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **147 tools across 22 modules** — transport, tracks, MIDI, FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
 **ReaperMCP itself runs entirely on your machine** via a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI never leave your computer. The AI "brain" naturally lives wherever you already run it: Claude Desktop / Claude Code / Cursor / Antigravity / any MCP client. You bring the AI, ReaperMCP handles REAPER.
 
@@ -106,7 +106,7 @@ Open your AI client and start talking:
 
 ## Features
 
-### 143 Tools Across 21 Modules
+### 147 Tools Across 22 Modules
 
 | Category | Tools | Highlights |
 |----------|------:|------------|
@@ -130,6 +130,7 @@ Open your AI client and start talking:
 | **Bus Pipelines** | 4 | `setup_parallel_compression`, `setup_drum_bus`, `setup_vocal_chain`, `bounce_stems` |
 | **Composition Utility** | 3 | `get_track_instruments`, `analyze_score`, `compose_arrangement` (small batch insert) |
 | **Composition Editing** | 9 | `wipe_all_midi`, `reset_composition`, `configure_tracks`, `setup_routing`, `add_markers_batch`, `rewrite_cc`, `edit_section`, `setup_fx_chain`, `setup_effect_bus` |
+| **Audio Analysis** | 4 | `analyze_loudness` (LUFS vs. streaming/broadcast/cinema target), `analyze_clipping`, `analyze_frequency_spectrum`, `analyze_stereo_field` — objective mix metrics for `measure → correct` loops. Optional extras: `pip install 'reaper-mcp[analysis]'` |
 | **Demo** | 1 | `demo_edm_project` — one-shot full-project demo render (smoke test + reference) |
 
 > See **[docs/TOOLS.md](docs/TOOLS.md)** for the complete tool reference with every signature and a one-line description for each tool.
@@ -216,7 +217,7 @@ Reaper-MCP/
 │   │       ├── pop.py              # 4 pop subgenres
 │   │       ├── electronic.py       # synthwave, lofi, ambient, hiphop
 │   │       └── _shared.py          # Shared role → EQ/comp library
-│   └── tools/                      # 21 modules, 143 auto-registered tools
+│   └── tools/                      # 22 modules, 147 auto-registered tools
 │       ├── transport_tools.py      # Playback and recording (11)
 │       ├── track_tools.py          # Track management + freeze (18)
 │       ├── template_tools.py       # Track templates (4)
@@ -237,6 +238,7 @@ Reaper-MCP/
 │       ├── pipeline_tools.py       # Drum bus, parallel comp, vocal chain, stems (4)
 │       ├── compose_tools.py        # get_track_instruments, analyze_score, compose_arrangement (3)
 │       ├── compose_edit_tools.py   # wipe_all_midi, edit_section, rewrite_cc, … (9)
+│       ├── analysis_tools.py       # LUFS, clipping, spectrum, stereo field (4, optional deps)
 │       ├── demo_tools.py           # demo_edm_project (1)
 │       └── compose_helpers.py      # Shared helpers (no tools)
 ├── reaper_mcp_shared/

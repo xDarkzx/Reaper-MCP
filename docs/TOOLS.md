@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **143 tools across 21 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **147 tools across 22 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -30,6 +30,7 @@ Complete reference for every MCP tool exposed by ReaperMCP — **143 tools acros
 | [Bus Pipelines](#bus-pipelines) | `pipeline_tools.py` | 4 |
 | [Composition Utility](#composition-utility) | `compose_tools.py` | 3 |
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
+| [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
 ---
@@ -326,6 +327,29 @@ Heavier-duty editing — project-scale wipes, section replacements, batch setup.
 | `edit_section(tracks, start_time, end_time, mode)` | Replace MIDI inside a time range. Modes: `all`, `notes_only`, `ccs_only`. |
 | `setup_fx_chain(tracks)` | Batch-apply FX chains to multiple tracks from a single description. |
 | `setup_effect_bus(...)` | Create an effect bus (usually reverb) with sends from chosen source tracks. |
+
+## Audio Analysis
+
+Objective mix metrics from a rendered WAV. Pair with `project_export_audio` + `engine_master` for a measure → correct loop. Source: `analysis_tools.py`.
+
+Requires optional dependencies — install with `pip install 'reaper-mcp[analysis]'` (adds `numpy`, `soundfile`, `pyloudnorm`). If deps are missing, these tools simply aren't registered and the server logs a one-line hint to stderr.
+
+| Tool | Description |
+|------|-------------|
+| `analyze_loudness(wav_path, reference="streaming")` | Integrated LUFS, true peak, RMS, crest factor. Computes delta against a reference target (`streaming` / `spotify` / `apple_music` / `youtube` / `broadcast` / `cinema` / `club`) and returns a plain-English hint. |
+| `analyze_clipping(wav_path, threshold_db=-0.1)` | Count of samples at/above a clipping threshold, per channel and total. Default -0.1 dBFS catches anything near 0 dBTP. |
+| `analyze_frequency_spectrum(wav_path)` | Bass / low-mid / mid / high-mid / presence / brilliance energy split in dB, plus spectral centroid (brightness proxy) and a tonal-balance hint. |
+| `analyze_stereo_field(wav_path)` | Phase correlation (-1..+1), mid / side RMS, side-to-mid ratio, mono-compatibility hint. |
+
+**Typical workflow:**
+
+```
+engine_master("melodic_dubstep")               # apply a mastering chain
+project_export_audio("C:/renders/mix.wav")     # render the mix
+analyze_loudness("C:/renders/mix.wav")         # did we hit -14 LUFS?
+analyze_clipping("C:/renders/mix.wav")         # any true-peak overs?
+engine_fix_mix(...)                            # correct if off-target
+```
 
 ## Demo
 

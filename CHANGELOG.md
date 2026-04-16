@@ -2,6 +2,17 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Audio analysis tools** (`analysis_tools.py`, 4 tools) — objective mix metrics from a rendered WAV, designed to pair with `project_export_audio` + `engine_master` for a `measure → correct` loop:
+  - `analyze_loudness(wav_path, reference)` — integrated LUFS (pyloudnorm), true peak, RMS, crest factor, delta against streaming / broadcast / cinema / club targets.
+  - `analyze_clipping(wav_path, threshold_db)` — per-channel and total sample-clip counts at a configurable threshold.
+  - `analyze_frequency_spectrum(wav_path)` — 7-band energy split (sub / bass / low-mid / mid / high-mid / presence / brilliance), spectral centroid, tonal-balance hint.
+  - `analyze_stereo_field(wav_path)` — phase correlation, mid / side RMS, side-to-mid ratio, mono-compatibility hint.
+- **Optional `[analysis]` extras** — `numpy`, `soundfile`, `pyloudnorm`. Install with `pip install 'reaper-mcp[analysis]'`. Tools degrade silently and log a one-line hint to stderr if deps are missing, so the server stays up.
+
 ## [0.3.0] - 2026-04-17
 
 ### Added
