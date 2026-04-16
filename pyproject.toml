@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reaper-mcp"
+version = "0.3.0"
+description = "MCP server for AI-driven music production in REAPER via file-based IPC with a Lua bridge"
+license = "Apache-2.0"
+authors = [
+    { name = "Daniel Hodgetts" },
+]
+readme = "README.md"
+keywords = ["reaper", "mcp", "audio", "ai", "model-context-protocol", "daw", "music-production"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Editors",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "mido>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["reaper_mcp", "reaper_mcp_shared"]
+
+[project.scripts]
+reaper-mcp = "reaper_mcp.main:main"
