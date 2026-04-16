@@ -25,7 +25,7 @@
 
 ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **143 tools across 21 modules** — transport, tracks, MIDI, FX, envelopes, sidechain, mixing, mastering, and bus pipelines. Talk to your AI assistant and it composes, mixes, and masters music in real-time — the AI chooses every note, rhythm, and CC itself.
 
-**No cloud. No API keys for audio processing. Everything runs locally through a Lua IPC bridge inside REAPER.**
+**ReaperMCP itself runs entirely on your machine** via a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI never leave your computer. The AI "brain" naturally lives wherever you already run it: Claude Desktop / Claude Code / Cursor / Antigravity / any MCP client. You bring the AI, ReaperMCP handles REAPER.
 
 ### Works With
 
