@@ -36,7 +36,8 @@ async def run_master_pipeline(client, style: str, clean: bool = True) -> dict:
     suite = await detect_plugins(client)
     spec = profile.mastering
 
-    fx_chain = _build_master_fx_chain(spec, suite)
+    from reaper_mcp.mix_engine import _tag_mix_fx
+    fx_chain = [_tag_mix_fx(e) for e in _build_master_fx_chain(spec, suite)]
 
     result = await client.execute(
         "setup_master_chain",

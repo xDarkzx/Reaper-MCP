@@ -226,3 +226,32 @@ def register(mcp: FastMCP):
         if new_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "new_index must be >= 0")
         return await client.execute("fx_move", track_index=track_index, fx_index=fx_index, new_index=new_index)
+
+    @mcp.tool()
+    async def fx_rename(track_index: int, fx_index: int, new_name: str) -> dict:
+        """Rename an FX instance's display label (cosmetic — plugin unchanged).
+
+        Use to tag FX you've added yourself so later cleanup can find them
+        without affecting other FX on the track. The mix engine uses this
+        internally to prefix all its additions with "[MIX] ".
+
+        Args:
+            track_index: 0-based track index.
+            fx_index: FX slot within the chain.
+            new_name: New display name. Max 1000 characters.
+
+        Requires REAPER 6.37+ (for TrackFX_SetNamedConfigParm with
+        "renamed_name"). Older REAPER versions will error out cleanly.
+        """
+        if track_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        if fx_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
+        if not new_name:
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "new_name must be non-empty")
+        if len(new_name) > 1000:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "new_name must be <= 1000 chars")
+        return await client.execute(
+            "fx_rename",
+            track_index=track_index, fx_index=fx_index, new_name=new_name,
+        )

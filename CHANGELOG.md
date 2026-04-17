@@ -4,6 +4,28 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`fx_rename(track_index, fx_index, new_name)`** — new tool + Lua handler
+  (`TrackFX_SetNamedConfigParm("renamed_name", …)`) for renaming an FX's
+  display label. Used internally by the mix engine to tag its own FX with
+  the `[MIX] ` prefix so cleanup can distinguish them from user-added FX.
+  Requires REAPER 6.37+. Tool surface: 149 → 150.
+
+### Fixed
+
+- **Mix cleanup no longer nukes user-added FX.** The mix engine now tags
+  every FX it adds via `setup_fx_chain` / `setup_master_chain` with a
+  `[MIX] ` prefix. Cleanup matches the prefix first; it only falls back to
+  the old substring-name match if no tagged FX are found on a track
+  (backward compat for projects from before this change or REAPER < 6.37).
+  Users can now freely keep their own `ReaEQ` / `ReaComp` / `Pro-Q 3` /
+  `Pro-C 2` instances on tracks they're also running the mix engine on.
+- **Lua JSON encoder preserves full float precision.** The previous
+  `"%.6f"` format truncated MIDI positions to microsecond granularity
+  (roughly 48 samples at 48 kHz), which caused quiet drift on sub-sample
+  batch inserts. Now `"%.17g"` — full IEEE-754 double round-trip.
+
 ### Fixed
 
 Hardening pass following a full code audit. No API changes — all behaviour

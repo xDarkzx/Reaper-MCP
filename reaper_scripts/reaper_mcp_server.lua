@@ -99,7 +99,12 @@ local function json_encode(val, depth, visited)
     if val == math.floor(val) and val >= -2147483648 and val <= 2147483647 then
       return string.format("%d", val)
     end
-    return string.format("%.6f", val)
+    -- %.17g preserves full IEEE-754 double precision on the round-trip
+    -- Lua → JSON → Python. The old "%.6f" truncated MIDI positions to
+    -- microsecond granularity, which quietly drifted notes off-grid on
+    -- sub-sample batch inserts. %.17g gives ~15 decimal digits — enough
+    -- to keep every float we actually handle bit-exact.
+    return string.format("%.17g", val)
   elseif t == "string" then
     val = val:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t'):gsub('%z', '')
     return '"' .. val .. '"'
@@ -1098,6 +1103,27 @@ function fx.fx_move(p)
   local ni = require_int(p, "new_index")
   reaper.TrackFX_CopyToTrack(tr, fi, tr, ni, true)
   return build_fx_chain(tr)
+end
+
+-- Rename an FX instance's display name (purely cosmetic — the underlying
+-- plugin is unchanged). Used by the mix engine to tag its own FX with
+-- "[MIX] " so cleanup can find them without affecting user-added FX.
+function fx.fx_rename(p)
+  local tr, idx, err = get_track(p)
+  if not tr then return nil, err end
+  local fi = require_int(p, "fx_index")
+  if p.new_name == nil then return nil, "Missing parameter: new_name" end
+  local new_name = tostring(p.new_name)
+  if #new_name > 1000 then return nil, "new_name exceeds 1000 characters" end
+  if reaper.TrackFX_SetNamedConfigParm then
+    local ok = reaper.TrackFX_SetNamedConfigParm(tr, fi, "renamed_name", new_name)
+    if not ok then
+      return nil, "TrackFX_SetNamedConfigParm failed (fx_index may be out of range or plugin doesn't support rename)"
+    end
+  else
+    return nil, "REAPER is too old — TrackFX_SetNamedConfigParm requires REAPER 6.37+"
+  end
+  return {track_index = idx, fx_index = fi, new_name = new_name}
 end
 
 -- Enumerate every FX installed in REAPER's plugin list (VST2/VST3/JS/AU).
@@ -2610,6 +2636,13 @@ function compose.setup_fx_chain(p)
           reaper.TrackFX_SetEnabled(tr, fx_idx, false)
         end
 
+        -- Optional rename — cosmetic label used by mix engine to tag
+        -- its own FX with "[MIX] " so cleanup can find them without
+        -- touching user-added FX of the same plugin type.
+        if fx_entry.renamed_name and reaper.TrackFX_SetNamedConfigParm then
+          reaper.TrackFX_SetNamedConfigParm(tr, fx_idx, "renamed_name", tostring(fx_entry.renamed_name))
+        end
+
         reaper.ShowConsoleMsg(string.format(
           "  Track %d: FX %d (%s) — %d params set\n",
           ti, fx_idx, fx_entry.name or "existing", #params_set))
@@ -2784,14 +2817,31 @@ function compose.setup_master_chain(p)
       clear_names = clear_names or {"ReaEQ", "ReaComp", "ReaLimit",
                                      "FabFilter Pro-Q 3", "FabFilter Pro-C 2",
                                      "FabFilter Pro-L", "FabFilter Pro-L 2"}
+      -- First pass: remove any FX tagged by the mix engine with the
+      -- "[MIX] " prefix. Safe — we know we added these.
       local num_fx = reaper.TrackFX_GetCount(master)
+      local any_tagged = false
       for fi = num_fx - 1, 0, -1 do
         local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
-        for _, cname in ipairs(clear_names) do
-          if fn:find(cname, 1, true) then
-            reaper.TrackFX_Delete(master, fi)
-            cleared = cleared + 1
-            break
+        if fn:sub(1, 6) == "[MIX] " then
+          reaper.TrackFX_Delete(master, fi)
+          cleared = cleared + 1
+          any_tagged = true
+        end
+      end
+      -- Fallback — only if we found NO tagged FX, fall back to name-substring
+      -- matching for backward compat with projects from before the prefix
+      -- system. New projects rely on the tagged pass above exclusively.
+      if not any_tagged then
+        num_fx = reaper.TrackFX_GetCount(master)
+        for fi = num_fx - 1, 0, -1 do
+          local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
+          for _, cname in ipairs(clear_names) do
+            if fn:find(cname, 1, true) then
+              reaper.TrackFX_Delete(master, fi)
+              cleared = cleared + 1
+              break
+            end
           end
         end
       end
@@ -2837,6 +2887,13 @@ function compose.setup_master_chain(p)
 
           if fx_entry.preset then
             reaper.TrackFX_SetPreset(master, fx_idx, fx_entry.preset)
+          end
+
+          -- Tag with caller-supplied display name so cleanup can identify
+          -- mix-engine-added FX. The mix engine passes "[MIX] <plugin>"
+          -- so a later clean=true pass won't destroy user-added FX.
+          if fx_entry.renamed_name and reaper.TrackFX_SetNamedConfigParm then
+            reaper.TrackFX_SetNamedConfigParm(master, fx_idx, "renamed_name", tostring(fx_entry.renamed_name))
           end
 
           results[#results+1] = {name = fx_entry.name, fx_index = fx_idx}

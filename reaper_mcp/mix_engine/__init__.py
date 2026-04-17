@@ -24,11 +24,32 @@ from reaper_mcp.mix_engine.profiles import (
 
 logger = logging.getLogger(__name__)
 
+# Tag every FX the mix engine adds with this prefix on the FX's display
+# name. Cleanup removes FX by matching the prefix — user-added FX stay
+# safe because they don't carry the tag. Uses setup_fx_chain's
+# `renamed_name` field, which delegates to REAPER's
+# TrackFX_SetNamedConfigParm("renamed_name", …). Requires REAPER 6.37+.
+_MIX_FX_PREFIX = "[MIX] "
+
 # Names used to identify mix-engine-created tracks/FX for cleanup
 _REVERB_BUS_PREFIX = "MIX:"
+
+# Backward-compat fallback list — used only if we can't find any
+# prefix-tagged FX on a track. Projects from before the prefix system
+# (or REAPER < 6.37) fall through to substring matching.
 _MIX_EQ_NAMES = {"ReaEQ", "FabFilter Pro-Q 3"}
 _MIX_COMPRESSOR_NAMES = {"ReaComp", "FabFilter Pro-C 2"}
 _MIX_REVERB_NAMES = {"ReaVerbate", "FabFilter Pro-R"}
+
+
+def _tag_mix_fx(entry: dict) -> dict:
+    """Return a copy of an fx_chain entry with `renamed_name` set to
+    `[MIX] <plugin>`. If the entry already has `renamed_name`, leave it.
+    """
+    tagged = dict(entry)
+    if tagged.get("name") and not tagged.get("renamed_name"):
+        tagged["renamed_name"] = f"{_MIX_FX_PREFIX}{tagged['name']}"
+    return tagged
 
 
 async def run_mix_pipeline(
@@ -162,7 +183,7 @@ async def _v2_apply_eq(client, profile, role_map, plugin_profile) -> int:
         role = profile.instrument_roles.get(role_name)
         if role is None or role.eq is None:
             continue
-        fx_entry = plugin_profile.eq_fx_chain_entry(role.eq.to_legacy_dict())
+        fx_entry = _tag_mix_fx(plugin_profile.eq_fx_chain_entry(role.eq.to_legacy_dict()))
         tracks_with_eq.append({"track_index": ti, "fx_chain": [fx_entry]})
     if tracks_with_eq:
         await client.execute("setup_fx_chain", tracks=json.dumps(tracks_with_eq))
@@ -175,7 +196,7 @@ async def _v2_apply_comp(client, profile, role_map, plugin_profile) -> int:
         role = profile.instrument_roles.get(role_name)
         if role is None or role.comp is None:
             continue
-        fx_entry = plugin_profile.compression_fx_chain_entry(role.comp.to_dict())
+        fx_entry = _tag_mix_fx(plugin_profile.compression_fx_chain_entry(role.comp.to_dict()))
         tracks_with_comp.append({"track_index": ti, "fx_chain": [fx_entry]})
     if tracks_with_comp:
         await client.execute("setup_fx_chain", tracks=json.dumps(tracks_with_comp))
@@ -191,7 +212,7 @@ async def _v2_create_reverb_buses(client, profile, plugin_profile) -> dict:
     for bus_name, reverb_bus in buses.items():
         display_name = f"{_REVERB_BUS_PREFIX} {bus_name.title()}"
         config_dict = reverb_bus.to_dict()
-        fx_entry = plugin_profile.reverb_fx_chain_entry(config_dict)
+        fx_entry = _tag_mix_fx(plugin_profile.reverb_fx_chain_entry(config_dict))
 
         result = await client.execute(
             "setup_effect_bus",
@@ -325,16 +346,16 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
     """Remove previously-added mix EQ/compressor from the given tracks and
     delete MIX:* reverb buses.
 
-    ⚠ LIMITATION: This function removes every ReaEQ / ReaComp / Pro-Q 3 /
-    Pro-C 2 instance on the given tracks — including any the user added
-    manually, since the mix engine doesn't yet mark its own FX with a
-    distinguishing prefix. Operation is scoped to tracks in `track_indices`
-    (only tracks the mix engine is currently processing), so user FX on
-    other tracks is never touched.
+    Primary match: FX whose display name starts with the "[MIX] " prefix —
+    these are FX the mix engine added itself via setup_fx_chain's
+    `renamed_name` field, so removing them never touches user-added FX.
 
-    Callers that don't want this behaviour should pass `clean=False` to
-    `engine_mix` / `engine_master`. Future: add an fx_rename handler and
-    tag mix-engine FX with a "[MIX]" prefix.
+    Fallback (only if no tagged FX found on a track): match common mix
+    plugin names by substring. This handles projects from before the
+    prefix system or REAPER versions without TrackFX_SetNamedConfigParm.
+
+    Operation is scoped to `track_indices` (tracks the mix engine is
+    currently processing), so user FX on other tracks is never touched.
     """
     removed = 0
     for ti in track_indices:
@@ -342,16 +363,33 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
             chain_result = await client.execute("fx_get_chain", track_index=ti)
             data = chain_result.get("data", chain_result)
             fx_chain = data.get("fx_chain", [])
+
+            # Primary pass — remove anything we tagged with [MIX].
+            any_tagged = False
             for fx in reversed(fx_chain):
                 fx_name = fx.get("name", "")
-                for mix_fx_name in _MIX_EQ_NAMES | _MIX_COMPRESSOR_NAMES:
-                    if mix_fx_name in fx_name:
-                        await client.execute(
-                            "fx_remove", track_index=ti, fx_index=fx["index"]
-                        )
-                        logger.info("Cleanup: removed %r from track %d", fx_name, ti)
-                        removed += 1
-                        break
+                if fx_name.startswith(_MIX_FX_PREFIX):
+                    await client.execute("fx_remove", track_index=ti, fx_index=fx["index"])
+                    logger.info("Cleanup: removed tagged %r from track %d", fx_name, ti)
+                    removed += 1
+                    any_tagged = True
+
+            # Fallback pass — only if no tagged FX were found. Preserves
+            # old-project behaviour but is less safe (can match user FX).
+            if not any_tagged:
+                chain_result = await client.execute("fx_get_chain", track_index=ti)
+                data = chain_result.get("data", chain_result)
+                fx_chain = data.get("fx_chain", [])
+                for fx in reversed(fx_chain):
+                    fx_name = fx.get("name", "")
+                    for mix_fx_name in _MIX_EQ_NAMES | _MIX_COMPRESSOR_NAMES:
+                        if mix_fx_name in fx_name:
+                            await client.execute(
+                                "fx_remove", track_index=ti, fx_index=fx["index"]
+                            )
+                            logger.info("Cleanup (fallback): removed %r from track %d", fx_name, ti)
+                            removed += 1
+                            break
         except Exception as e:
             logger.warning("Could not clean FX on track %d: %s", ti, e)
 
@@ -393,7 +431,7 @@ async def _apply_eq(client, track_map: dict, plugin_profile) -> int:
         eq_profile = EQ_PROFILES.get(inst_name)
         if not eq_profile:
             continue
-        fx_entry = plugin_profile.eq_fx_chain_entry(eq_profile)
+        fx_entry = _tag_mix_fx(plugin_profile.eq_fx_chain_entry(eq_profile))
         tracks_with_eq.append({"track_index": int(ti_str), "fx_chain": [fx_entry]})
     if tracks_with_eq:
         await client.execute("setup_fx_chain", tracks=json.dumps(tracks_with_eq))
@@ -406,7 +444,7 @@ async def _apply_compression(client, track_map: dict, plugin_profile) -> int:
         comp_profile = COMPRESSION_PROFILES.get(inst_name)
         if not comp_profile:
             continue
-        fx_entry = plugin_profile.compression_fx_chain_entry(comp_profile)
+        fx_entry = _tag_mix_fx(plugin_profile.compression_fx_chain_entry(comp_profile))
         tracks_with_comp.append({"track_index": int(ti_str), "fx_chain": [fx_entry]})
     if tracks_with_comp:
         await client.execute("setup_fx_chain", tracks=json.dumps(tracks_with_comp))
@@ -418,7 +456,7 @@ async def _create_reverb_buses(client, plugin_profile) -> dict:
     for bus_name, config in REVERB_BUSES.items():
         display_name = f"{_REVERB_BUS_PREFIX} {bus_name.title()}"
         color = config.get("color", [128, 128, 128])
-        fx_entry = plugin_profile.reverb_fx_chain_entry(config)
+        fx_entry = _tag_mix_fx(plugin_profile.reverb_fx_chain_entry(config))
         result = await client.execute(
             "setup_effect_bus",
             bus_name=display_name,
