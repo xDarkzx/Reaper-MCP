@@ -21,7 +21,7 @@ PROFILES: dict[str, set[str] | None] = {
         "transport_tools", "track_tools", "template_tools", "project_tools",
         "item_tools", "take_tools", "midi_tools", "quantize_tools",
         "marker_tools", "tempo_tools", "selection_tools",
-        "compose_tools", "compose_edit_tools",
+        "compose_tools", "compose_edit_tools", "patterns_tools",
     },
     # `mixing` — mix + master + bus pipelines + analysis. Drops MIDI/composition.
     "mixing": {

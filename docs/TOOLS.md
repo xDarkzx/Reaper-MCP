@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **147 tools across 22 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **149 tools across 23 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,8 +12,8 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 22 | 147 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 13 | ~104 | Writing or editing music. Drops FX, mix, sidechain, analysis. |
+| `full` | 23 | 149 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 14 | ~106 | Writing or editing music (incl. patterns). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~40 | Smoke test / basic control surface. |
@@ -67,6 +67,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Bus Pipelines](#bus-pipelines) | `pipeline_tools.py` | 4 |
 | [Composition Utility](#composition-utility) | `compose_tools.py` | 3 |
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
+| [Patterns](#patterns) | `patterns_tools.py` | 2 |
 | [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
@@ -364,6 +365,33 @@ Heavier-duty editing — project-scale wipes, section replacements, batch setup.
 | `edit_section(tracks, start_time, end_time, mode)` | Replace MIDI inside a time range. Modes: `all`, `notes_only`, `ccs_only`. |
 | `setup_fx_chain(tracks)` | Batch-apply FX chains to multiple tracks from a single description. |
 | `setup_effect_bus(...)` | Create an effect bus (usually reverb) with sends from chosen source tracks. |
+
+## Patterns
+
+High-affordance shortcuts for common MIDI patterns — the AI reaches for these directly instead of parsing shorthand. Source: `patterns_tools.py`.
+
+| Tool | Description |
+|------|-------------|
+| `create_drum_pattern(track_index, pattern, item_index=-1, start_qn=0.0, steps_per_bar=16, bar_count=1, velocity=100, channel=9)` | Multi-lane step sequencer. Each line of `pattern` is one drum lane. Characters: `k`=kick, `s`=snare, `h`=hat closed, `o`=hat open, `c`=crash, `r`=ride, `t`=tom, `l`=low tom, `i`=high tom, `p`=clap, `b`=rimshot, `.`=rest. Auto-creates a MIDI item if `item_index=-1`. |
+| `create_chord_progression(track_index, chords, item_index=-1, start_qn=0.0, chord_duration_qn=4.0, velocity=96, channel=0, base_octave=4)` | Parse chord names (`"Cm7, Fm7, Bb7, Eb"`) into voiced MIDI. Supports `maj`, `m`, `dim`, `aug`, `sus2`, `sus4`, `6`, `7`, `maj7`, `m7`, `9`, `m9`, `maj9`, `11`, `13`, `add9`, `dim7`, `7sus4`. Separators: comma, pipe, dash-with-spaces, newline. |
+
+**Drum pattern example** — classic 16-step rock beat:
+
+```
+k...k...k...k...
+....s.......s...
+h.h.h.h.h.h.h.h.
+```
+
+**Chord progression examples:**
+
+```
+"Cm7, Fm7, Bb7, Eb"           # comma-separated
+"Am - F - C - G"              # dash-separated
+"Dm | G | Em | A"             # pipe-separated
+```
+
+Both tools return a `hint` field suggesting the AI's next step (e.g., *"Call midi_humanize() for timing variation"*).
 
 ## Audio Analysis
 
