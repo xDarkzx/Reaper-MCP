@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **159 tools across 25 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **162 tools across 25 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,8 +12,8 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 25 | 159 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 16 | ~115 | Writing or editing music (incl. patterns, loops, vocal chops). Drops FX, mix, sidechain, analysis. |
+| `full` | 25 | 162 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 16 | ~118 | Writing or editing music (incl. patterns, loops, vocal chops). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~40 | Smoke test / basic control surface. |
@@ -69,7 +69,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
 | [Patterns](#patterns) | `patterns_tools.py` | 2 |
 | [Loop Library](#loop-library) | `loops_tools.py` | 3 |
-| [Vocal Chops](#vocal-chops) | `chops_tools.py` | 6 |
+| [Vocal Chops](#vocal-chops) | `chops_tools.py` | 9 |
 | [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
@@ -441,9 +441,17 @@ The intended workflow: **user manually loads an audio item on a track in REAPER*
 | `take_set_pitch(item_index, semitones, take_index=-1)` | Pitch-shift a take by N semitones. Float, range -60 to +60. The core of "tune a chop to a chord tone". Pitch quality depends on REAPER's pitch shift mode setting (Élastique Pro Soloist preserves vocal formants). |
 | `take_set_playrate(item_index, rate, preserve_pitch=True)` | Time-stretch by changing playrate. With `preserve_pitch=True` (default), audio plays slower/faster without pitch change. With `False`, becomes vinyl-style speed change (faster = higher pitch). Range 0.05–16.0. |
 | `take_set_reversed(item_index)` | Reverse an item's audio. Uses REAPER's "Reverse items as new take" action — the reversed take becomes active, original is preserved. Reverse-cymbal-into-downbeat fills, breath-in vocal FX, glitchy chop reversals. |
-| `item_duplicate(item_index, count, spacing_sec=0)` | Copy an item N times (1-100) at fixed spacing. Each copy preserves pitch / playrate / FX. Default spacing = item length (back-to-back). For 1/16 stutters at 128 BPM: `spacing_sec = 60/128/4 = 0.117`. |
+| `item_duplicate(item_index, count, spacing_sec=0)` | Copy an item N times (1-100) at fixed spacing. Each copy preserves pitch / playrate / FX. Default spacing = item length (back-to-back). For 1/16 stutters at 128 BPM: `spacing_sec = 60/128/4 = 0.117`. Returns new item indices. |
 
-**Typical AI workflow** for vocal chops:
+**Phase 2 — high-level helpers** (built on top of the primitives + chord theory):
+
+| Tool | Description |
+|------|-------------|
+| `analyze_chop_set(item_indices)` | Inspect a list of chops, classify each by duration (`hit` / `staccato` / `syllable` / `sustain`), return summary stats. Helps the AI decide which chops fit which musical role without doing audio content analysis. |
+| `arrange_chops_to_chord_tones(item_indices, chord_progression, beats_per_chord=4, bpm=0, layout="follow", source_root="C")` | For each chop in playback order, calculate the chord tone it should hit (based on time position + the supplied chord progression) and pitch-shift it via `take_set_pitch`. Layouts: `follow` (cycles root/3rd/5th), `ascending` (climbs chord tones), `porter` (root/5th/octave bounce — Porter Robinson signature), `root` (every chop = root). |
+| `stack_chop_layers(item_indices, intervals_semitones="[7, 12]")` | For each chop, create overlay clones at parallel pitch intervals on the same track. The classic future-bass stack: original + 5th + octave. Best applied to a SUBSET of chops, not every one. |
+
+**Typical AI workflow** for vocal chops (with Phase 2 helpers):
 
 ```
 User loads vocal acapella on a track named "Vocal".
@@ -453,23 +461,34 @@ User loads vocal acapella on a track named "Vocal".
       transport_get_state() → confirms 128 BPM, F#m project key
 
       item_split_at_transients(item_index=5)
-        → 12 chops created at indices 5-16 (returned in playback order)
+        → 12 chops at indices 5-16, in playback order
 
-      For each chop, decide pitch + role:
-        take_set_pitch(item_index=5,  semitones=0)   # root F#
-        take_set_pitch(item_index=6,  semitones=4)   # major 3rd (A#)
-        take_set_pitch(item_index=7,  semitones=7)   # 5th (C#)
-        take_set_pitch(item_index=8,  semitones=12)  # octave (F#)
-        ... follows the chord progression
+      analyze_chop_set([5,6,7,8,...,16])
+        → "3 staccato, 7 syllable, 2 sustain"
 
-      For dramatic moment at the drop:
+      arrange_chops_to_chord_tones(
+        item_indices=[5,6,7,8,...,16],
+        chord_progression="F#m, D, A, E",
+        beats_per_chord=4,
+        layout="follow"
+      )
+        → AI walks chops, assigns each to a chord-tone shift via take_set_pitch.
+          Output: per-chop chord assignment + applied pitch.
+
+      stack_chop_layers(
+        item_indices=[10, 13],   # the standout chops
+        intervals_semitones="[7, 12]"
+      )
+        → adds 5th + octave overlay layers on those two chops.
+
+      Optional dramatic moment:
         item_duplicate(item_index=10, count=4, spacing_sec=0.117)  # 1/16 stutter
         take_set_reversed(item_index=11)                           # reverse FX
 
-User hits play → vocal chops cascade through the chord progression.
+User hits play → harmonized vocal chops cascade through the chord progression.
 ```
 
-The AI brings the **musical decisions** (pitch arrangement, rhythmic timing, where stutters land). These tools handle the **mechanical work**.
+The AI brings the **musical decisions** (which chord progression, where stutters land). These tools handle the **mechanical work** + the chord-theory math.
 
 ## Audio Analysis
 

@@ -6,6 +6,12 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **Vocal-chop Phase 2 helpers** (3 more tools on top of Phase 1 primitives):
+  - `analyze_chop_set(item_indices)` — calls `item_get_info` per chop, classifies duration as `hit` / `staccato` / `syllable` / `sustain` so the AI can pick chops appropriate to each musical role without doing audio content analysis.
+  - `arrange_chops_to_chord_tones(item_indices, chord_progression, beats_per_chord, bpm, layout, source_root)` — high-level pitch arranger. Walks chops in playback order, computes which chord each falls into (based on time + `beats_per_chord` + project tempo), picks a chord tone per `layout` (`follow` / `ascending` / `porter` / `root`), and applies pitch shifts via `take_set_pitch`. The Porter Robinson signature pattern (root → 5th → octave → 5th) is built in.
+  - `stack_chop_layers(item_indices, intervals_semitones)` — for each chop, creates overlay clones on the same track at parallel pitch intervals. Default `[7, 12]` = perfect 5th + octave (the future-bass harmonized stack). Capped at 50 source chops to avoid mixer overload.
+  - New Lua handler `item_clone_to_position` to support `stack_chop_layers` overlay placement; existing `item_duplicate` enhanced to return new item indices in its response.
+  - Tool surface: 159 → 162 across 25 modules.
 - **Vocal chops primitives** (`chops_tools.py`, 6 tools) — building blocks for slicing, pitching, time-stretching, reversing, and duplicating audio items. Style-agnostic; the AI brings the artistic decisions, these tools do the mechanical work. Designed for the workflow where the user loads a vocal manually onto a REAPER track and the AI inspects it via `track_get_all` + `item_get_all`, then chops:
   - `item_split_at_transients(item_index)` — REAPER's native transient-split action wrapped to return the resulting chops in playback order with their indices and offsets.
   - `item_split_at_positions(item_index, positions)` — manual split at a JSON list of absolute project-time positions. For grid-based chopping or hand-picked slice points.

@@ -23,7 +23,7 @@
 
 ---
 
-ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **159 tools across 25 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), loop-library pipeline, **vocal chops** (slice / pitch / time-stretch / reverse / duplicate), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
+ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **162 tools across 25 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), loop-library pipeline, **vocal chops** (slice / pitch / time-stretch / reverse / duplicate + chord-tone arranger + harmonized stacks), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
 **ReaperMCP itself runs entirely on your machine** via a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI never leave your computer. The AI "brain" naturally lives wherever you already run it: Claude Desktop / Claude Code / Cursor / Antigravity / any MCP client. You bring the AI, ReaperMCP handles REAPER.
 
@@ -106,7 +106,7 @@ Open your AI client and start talking:
 
 ## Features
 
-### 159 Tools Across 25 Modules
+### 162 Tools Across 25 Modules
 
 | Category | Tools | Highlights |
 |----------|------:|------------|
@@ -132,7 +132,7 @@ Open your AI client and start talking:
 | **Composition Editing** | 9 | `wipe_all_midi`, `reset_composition`, `configure_tracks`, `setup_routing`, `add_markers_batch`, `rewrite_cc`, `edit_section`, `setup_fx_chain`, `setup_effect_bus` |
 | **Patterns** | 2 | `create_drum_pattern` (multi-lane step-sequencer notation), `create_chord_progression` (parses `"Cm7, Fm7, Bb7, Eb"` into voiced MIDI) |
 | **Loop Library** | 3 | `scan_audio_folder` (parse BPM / key / role from filenames), `detect_common_bpm`, `load_loops` (batch-create tracks + load stems). Point at a sample-pack folder and the AI builds a track from it. |
-| **Vocal Chops** | 6 | `item_split_at_transients`, `item_split_at_positions`, `take_set_pitch`, `take_set_playrate`, `take_set_reversed`, `item_duplicate` — primitives for slicing/pitching/duplicating audio items. The user loads a vocal; AI chops it into a melodic sequence. |
+| **Vocal Chops** | 9 | **Primitives:** `item_split_at_transients`, `item_split_at_positions`, `take_set_pitch`, `take_set_playrate`, `take_set_reversed`, `item_duplicate`. **Helpers:** `analyze_chop_set` (duration classification), `arrange_chops_to_chord_tones` (pitches each chop to a chord tone — follow / ascending / porter / root layouts), `stack_chop_layers` (harmonized overlay stacks). User loads a vocal; AI chops it into a chord-tone melody with stacks. |
 | **Audio Analysis** | 4 | `analyze_loudness` (LUFS vs. streaming/broadcast/cinema target), `analyze_clipping`, `analyze_frequency_spectrum`, `analyze_stereo_field` — objective mix metrics for `measure → correct` loops. Optional extras: `pip install 'reaper-mcp[analysis]'` |
 | **Demo** | 1 | `demo_edm_project` — one-shot full-project demo render (smoke test + reference) |
 

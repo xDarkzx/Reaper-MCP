@@ -1556,6 +1556,11 @@ function item.item_duplicate(p)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
+  -- Capture base index so we can hand back the new items' indices.
+  -- AddMediaItemToTrack appends to REAPER's global item list, so the
+  -- new indices are count_before, count_before+1, ... (sequential).
+  local count_before = reaper.CountMediaItems(0)
+
   local clones = {}
   for i = 1, count do
     local new_pos = pos + (i * spacing)
@@ -1563,7 +1568,11 @@ function item.item_duplicate(p)
     if new_item then
       reaper.SetItemStateChunk(new_item, chunk, false)
       reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
-      clones[#clones+1] = {position = new_pos, length = len}
+      clones[#clones+1] = {
+        item_index = count_before + (#clones),
+        position = new_pos,
+        length = len,
+      }
     end
   end
 
@@ -1576,6 +1585,58 @@ function item.item_duplicate(p)
     copies_created = #clones,
     spacing_sec = spacing,
     clones = clones,
+  }
+end
+
+-- Clone an item to a specific position, optionally on a different track.
+-- Used by stack_chop_layers to overlay copies at the same position with
+-- different pitch shifts (root + 5th + octave harmonized stack).
+function item.item_clone_to_position(p)
+  if p.source_item_index == nil then return nil, "Missing parameter: source_item_index" end
+  if p.target_position_sec == nil then return nil, "Missing parameter: target_position_sec" end
+
+  local idx = math.floor(p.source_item_index)
+  local source = reaper.GetMediaItem(0, idx)
+  if not source then return nil, "Source item not found" end
+
+  local target_track_idx = p.target_track_index
+  local target_track
+  if target_track_idx == nil or target_track_idx < 0 then
+    target_track = reaper.GetMediaItem_Track(source)
+  else
+    target_track = reaper.GetTrack(0, math.floor(target_track_idx))
+    if not target_track then return nil, "Target track not found" end
+  end
+
+  local target_pos = p.target_position_sec
+  if target_pos < 0 then target_pos = 0 end
+
+  local source_length = reaper.GetMediaItemInfo_Value(source, "D_LENGTH")
+  local _, chunk = reaper.GetItemStateChunk(source, "", false)
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  local count_before = reaper.CountMediaItems(0)
+  local new_item = reaper.AddMediaItemToTrack(target_track)
+  local new_idx = -1
+  if new_item then
+    reaper.SetItemStateChunk(new_item, chunk, false)
+    reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", target_pos)
+    new_idx = count_before
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: item_clone_to_position", -1)
+
+  if not new_item then return nil, "Failed to clone item" end
+
+  return {
+    source_item_index = idx,
+    new_item_index = new_idx,
+    position = target_pos,
+    length = source_length,
   }
 end
 
