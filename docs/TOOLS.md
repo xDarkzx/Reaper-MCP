@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **153 tools across 24 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **159 tools across 25 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,8 +12,8 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 24 | 153 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 15 | ~109 | Writing or editing music (incl. patterns and loops). Drops FX, mix, sidechain, analysis. |
+| `full` | 25 | 159 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 16 | ~115 | Writing or editing music (incl. patterns, loops, vocal chops). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~40 | Smoke test / basic control surface. |
@@ -69,6 +69,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
 | [Patterns](#patterns) | `patterns_tools.py` | 2 |
 | [Loop Library](#loop-library) | `loops_tools.py` | 3 |
+| [Vocal Chops](#vocal-chops) | `chops_tools.py` | 6 |
 | [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
@@ -426,6 +427,49 @@ engine_master("future_bass")
 ```
 
 No librosa / soundfile required. Filename parsing alone handles the 80% case for professionally-labelled sample packs. Files without parseable metadata are still scanned; their fields are null and the AI can skip them.
+
+## Vocal Chops
+
+Primitives for slicing, pitching, time-stretching, reversing, and duplicating audio items — the building blocks of vocal chop production. Style-agnostic; works for vocals, drums, FX, anything. Source: `chops_tools.py`.
+
+The intended workflow: **user manually loads an audio item on a track in REAPER** (vocal acapella, drum break, etc.); AI then uses `track_get_all` + `item_get_all` to find it and these tools to chop it.
+
+| Tool | Description |
+|------|-------------|
+| `item_split_at_transients(item_index)` | Slice an item at every detected transient using REAPER's native action. Sensitivity is set in REAPER's project preferences (Transient detection sensitivity). Returns the new chops in playback order with `item_index`, `position`, `length`, `offset_in_original_sec`. |
+| `item_split_at_positions(item_index, positions)` | Manual split at a JSON list of absolute project-time positions. Use for grid-based chopping (1/16 cuts) or hand-picked slice points. Positions outside the item's range are silently ignored. |
+| `take_set_pitch(item_index, semitones, take_index=-1)` | Pitch-shift a take by N semitones. Float, range -60 to +60. The core of "tune a chop to a chord tone". Pitch quality depends on REAPER's pitch shift mode setting (Élastique Pro Soloist preserves vocal formants). |
+| `take_set_playrate(item_index, rate, preserve_pitch=True)` | Time-stretch by changing playrate. With `preserve_pitch=True` (default), audio plays slower/faster without pitch change. With `False`, becomes vinyl-style speed change (faster = higher pitch). Range 0.05–16.0. |
+| `take_set_reversed(item_index)` | Reverse an item's audio. Uses REAPER's "Reverse items as new take" action — the reversed take becomes active, original is preserved. Reverse-cymbal-into-downbeat fills, breath-in vocal FX, glitchy chop reversals. |
+| `item_duplicate(item_index, count, spacing_sec=0)` | Copy an item N times (1-100) at fixed spacing. Each copy preserves pitch / playrate / FX. Default spacing = item length (back-to-back). For 1/16 stutters at 128 BPM: `spacing_sec = 60/128/4 = 0.117`. |
+
+**Typical AI workflow** for vocal chops:
+
+```
+User loads vocal acapella on a track named "Vocal".
+
+[AI]  track_get_all() → finds Vocal at track 2
+      item_get_all(track_index=2) → vocal item is index 5
+      transport_get_state() → confirms 128 BPM, F#m project key
+
+      item_split_at_transients(item_index=5)
+        → 12 chops created at indices 5-16 (returned in playback order)
+
+      For each chop, decide pitch + role:
+        take_set_pitch(item_index=5,  semitones=0)   # root F#
+        take_set_pitch(item_index=6,  semitones=4)   # major 3rd (A#)
+        take_set_pitch(item_index=7,  semitones=7)   # 5th (C#)
+        take_set_pitch(item_index=8,  semitones=12)  # octave (F#)
+        ... follows the chord progression
+
+      For dramatic moment at the drop:
+        item_duplicate(item_index=10, count=4, spacing_sec=0.117)  # 1/16 stutter
+        take_set_reversed(item_index=11)                           # reverse FX
+
+User hits play → vocal chops cascade through the chord progression.
+```
+
+The AI brings the **musical decisions** (pitch arrangement, rhythmic timing, where stutters land). These tools handle the **mechanical work**.
 
 ## Audio Analysis
 

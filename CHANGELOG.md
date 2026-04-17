@@ -6,6 +6,14 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **Vocal chops primitives** (`chops_tools.py`, 6 tools) — building blocks for slicing, pitching, time-stretching, reversing, and duplicating audio items. Style-agnostic; the AI brings the artistic decisions, these tools do the mechanical work. Designed for the workflow where the user loads a vocal manually onto a REAPER track and the AI inspects it via `track_get_all` + `item_get_all`, then chops:
+  - `item_split_at_transients(item_index)` — REAPER's native transient-split action wrapped to return the resulting chops in playback order with their indices and offsets.
+  - `item_split_at_positions(item_index, positions)` — manual split at a JSON list of absolute project-time positions. For grid-based chopping or hand-picked slice points.
+  - `take_set_pitch(item_index, semitones, take_index=-1)` — per-take pitch shift in semitones via `D_PITCH`. Float, range -60..60. The core of "tune a chop to a chord tone".
+  - `take_set_playrate(item_index, rate, preserve_pitch=True)` — time-stretch via `D_PLAYRATE`. With `preserve_pitch=True` (default) audio plays slower/faster without pitch change.
+  - `take_set_reversed(item_index)` — reverse via REAPER's "Reverse items as new take" action. Original take preserved.
+  - `item_duplicate(item_index, count, spacing_sec=0)` — copy an item N times via `SetItemStateChunk` (preserves all take properties). Default spacing = item length for back-to-back placement.
+  - Tool surface: 153 → 159 across 25 modules.
 - **Loop-library pipeline** (`loops_tools.py`, 3 tools) — point the AI at a sample-pack folder (Prime Loops, Splice, Loopmasters, Native Instruments Expansions) and it builds a working REAPER session from the loops it finds:
   - `scan_audio_folder(path, recursive=True, max_files=500)` — walks a folder, parses BPM / key / role from each filename via regex (`Kick_140BPM_Am_01.wav` → `bpm=140, key="Am", role="kick"`). Returns distribution summary so the AI sees the dominant tempo / key cluster at a glance. Handles `.wav`, `.mp3`, `.flac`, `.aif`, `.aiff`, `.ogg`, `.m4a`.
   - `detect_common_bpm(file_paths)` — given a JSON array of paths, returns the most common BPM with per-value vote counts and a confidence score.

@@ -22,7 +22,7 @@ PROFILES: dict[str, set[str] | None] = {
         "item_tools", "take_tools", "midi_tools", "quantize_tools",
         "marker_tools", "tempo_tools", "selection_tools",
         "compose_tools", "compose_edit_tools", "patterns_tools",
-        "loops_tools",
+        "loops_tools", "chops_tools",
     },
     # `mixing` — mix + master + bus pipelines + analysis. Drops MIDI/composition.
     "mixing": {

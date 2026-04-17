@@ -1318,6 +1318,268 @@ function item.item_move_to_track(p)
 end
 
 -- ============================================================
+-- CHOP handlers (slicing, pitch, time-stretch, reverse, duplicate)
+-- ============================================================
+
+-- Slice an item at all detected transients using REAPER's native action.
+-- Returns the new chop items found on the original track within the
+-- original item's time range.
+function item.item_split_at_transients(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found at index " .. idx end
+
+  local tr = reaper.GetMediaItem_Track(it)
+  local orig_pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+  local orig_len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+  local orig_end = orig_pos + orig_len
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  reaper.Main_OnCommand(40289, 0)  -- Item: Unselect all items
+  reaper.SetMediaItemSelected(it, true)
+  local count_before = reaper.CountMediaItems(0)
+  reaper.Main_OnCommand(40310, 0)  -- Item: Split items at transients
+  local count_after = reaper.CountMediaItems(0)
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: item_split_at_transients", -1)
+
+  -- Build a global-index lookup (one O(N) pass) so per-chop lookup is O(1).
+  local index_by_item = {}
+  for g = 0, count_after - 1 do
+    index_by_item[reaper.GetMediaItem(0, g)] = g
+  end
+
+  -- Collect every item on the original track inside the original time range.
+  -- Sort by position so the AI gets chops in playback order.
+  local chops = {}
+  local n_on_track = reaper.CountTrackMediaItems(tr)
+  for i = 0, n_on_track - 1 do
+    local chop = reaper.GetTrackMediaItem(tr, i)
+    local p_pos = reaper.GetMediaItemInfo_Value(chop, "D_POSITION")
+    local p_len = reaper.GetMediaItemInfo_Value(chop, "D_LENGTH")
+    if p_pos >= orig_pos - 0.001 and p_pos < orig_end then
+      chops[#chops+1] = {
+        item_index = index_by_item[chop] or -1,
+        position = p_pos,
+        length = p_len,
+        offset_in_original_sec = p_pos - orig_pos,
+      }
+    end
+  end
+  table.sort(chops, function(a, b) return a.position < b.position end)
+
+  return {
+    original_item_index = idx,
+    chops_created = count_after - count_before,
+    chops_total = #chops,
+    chops = chops,
+  }
+end
+
+-- Manually split an item at a list of absolute project-time positions.
+-- Positions are sorted descending internally so earlier splits don't
+-- shift later ones.
+function item.item_split_at_positions(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  if not p.positions then return nil, "Missing parameter: positions" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+
+  local positions = json_decode(p.positions)
+  if type(positions) ~= "table" then return nil, "positions must be a JSON array" end
+
+  -- Validate + sort descending
+  local sorted = {}
+  for _, v in ipairs(positions) do
+    if type(v) == "number" then sorted[#sorted+1] = v end
+  end
+  table.sort(sorted, function(a, b) return a > b end)
+  if #sorted == 0 then return nil, "positions array contains no numbers" end
+
+  local tr = reaper.GetMediaItem_Track(it)
+  local orig_pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+  local orig_len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+  local orig_end = orig_pos + orig_len
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  local splits_made = 0
+  for _, pos in ipairs(sorted) do
+    if pos > orig_pos and pos < orig_end then
+      local right = reaper.SplitMediaItem(it, pos)
+      if right then splits_made = splits_made + 1 end
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: item_split_at_positions", -1)
+
+  -- Re-collect resulting items in playback order.
+  local count_after = reaper.CountMediaItems(0)
+  local index_by_item = {}
+  for g = 0, count_after - 1 do
+    index_by_item[reaper.GetMediaItem(0, g)] = g
+  end
+  local chops = {}
+  local n_on_track = reaper.CountTrackMediaItems(tr)
+  for i = 0, n_on_track - 1 do
+    local chop = reaper.GetTrackMediaItem(tr, i)
+    local p_pos = reaper.GetMediaItemInfo_Value(chop, "D_POSITION")
+    local p_len = reaper.GetMediaItemInfo_Value(chop, "D_LENGTH")
+    if p_pos >= orig_pos - 0.001 and p_pos < orig_end then
+      chops[#chops+1] = {
+        item_index = index_by_item[chop] or -1,
+        position = p_pos,
+        length = p_len,
+        offset_in_original_sec = p_pos - orig_pos,
+      }
+    end
+  end
+  table.sort(chops, function(a, b) return a.position < b.position end)
+
+  return {
+    original_item_index = idx,
+    splits_requested = #sorted,
+    splits_made = splits_made,
+    chops_total = #chops,
+    chops = chops,
+  }
+end
+
+-- Per-take pitch shift in semitones. Default operates on the active take;
+-- pass take_index >= 0 for a specific take.
+function item.take_set_pitch(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  if p.semitones == nil then return nil, "Missing parameter: semitones" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+
+  local take
+  local take_idx = p.take_index
+  if take_idx == nil or take_idx < 0 then
+    take = reaper.GetActiveTake(it)
+    take_idx = -1
+  else
+    take = reaper.GetMediaItemTake(it, math.floor(take_idx))
+  end
+  if not take then return nil, "Take not found" end
+
+  reaper.Undo_BeginBlock()
+  reaper.SetMediaItemTakeInfo_Value(take, "D_PITCH", p.semitones)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: take_set_pitch", -1)
+
+  return {
+    item_index = idx,
+    take_index = take_idx,
+    pitch_semitones = p.semitones,
+  }
+end
+
+-- Per-take playrate (time-stretch). With preserve_pitch=true the audio
+-- is time-stretched without pitch change (default behaviour).
+function item.take_set_playrate(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  if p.rate == nil then return nil, "Missing parameter: rate" end
+  if p.rate <= 0 then return nil, "rate must be > 0" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+  local take = reaper.GetActiveTake(it)
+  if not take then return nil, "No active take on item" end
+
+  reaper.Undo_BeginBlock()
+  reaper.SetMediaItemTakeInfo_Value(take, "D_PLAYRATE", p.rate)
+  if p.preserve_pitch ~= nil then
+    reaper.SetMediaItemTakeInfo_Value(take, "B_PPITCH", p.preserve_pitch and 1 or 0)
+  end
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: take_set_playrate", -1)
+
+  return {
+    item_index = idx,
+    rate = p.rate,
+    preserve_pitch = p.preserve_pitch,
+  }
+end
+
+-- Reverse the active take's audio. Uses REAPER's "reverse items as new
+-- take" action, which creates a reversed take and makes it active. The
+-- original take is preserved (item now has 2 takes, reversed is active).
+function item.take_set_reversed(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+  reaper.Main_OnCommand(40289, 0)  -- Unselect all items
+  reaper.SetMediaItemSelected(it, true)
+  reaper.Main_OnCommand(41051, 0)  -- Item: Reverse items as new take
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: take_set_reversed", -1)
+
+  return {item_index = idx, reversed = true}
+end
+
+-- Duplicate an item N times at fixed spacing. Each copy preserves the
+-- source, take properties (pitch / playrate / fades / etc.) via
+-- SetItemStateChunk. Default spacing = item length (back-to-back).
+function item.item_duplicate(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  if p.count == nil or p.count < 1 then return nil, "count must be >= 1" end
+  local idx = math.floor(p.item_index)
+  local count = math.floor(p.count)
+  if count > 100 then return nil, "count must be <= 100" end
+
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+
+  local tr = reaper.GetMediaItem_Track(it)
+  local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+  local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+
+  local spacing = p.spacing_sec
+  if spacing == nil or spacing <= 0 then spacing = len end
+
+  local _, chunk = reaper.GetItemStateChunk(it, "", false)
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  local clones = {}
+  for i = 1, count do
+    local new_pos = pos + (i * spacing)
+    local new_item = reaper.AddMediaItemToTrack(tr)
+    if new_item then
+      reaper.SetItemStateChunk(new_item, chunk, false)
+      reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
+      clones[#clones+1] = {position = new_pos, length = len}
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: item_duplicate x" .. count, -1)
+
+  return {
+    source_item_index = idx,
+    copies_created = #clones,
+    spacing_sec = spacing,
+    clones = clones,
+  }
+end
+
+-- ============================================================
 -- MARKER handlers
 -- ============================================================
 
