@@ -58,6 +58,60 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
         if item_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "item_index must be >= 0")
+        # Validate the JSON string before sending — the Lua side would
+        # return a generic "Invalid notes JSON" error but we can catch
+        # malformed structure here and give a precise reason.
+        import json as _json
+        try:
+            parsed = _json.loads(notes)
+        except _json.JSONDecodeError as e:
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                f"`notes` is not valid JSON: {e.msg} (line {e.lineno}, col {e.colno})",
+            )
+        if not isinstance(parsed, list):
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                f"`notes` must be a JSON array, got {type(parsed).__name__}",
+            )
+        if len(parsed) > 50000:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"Too many notes ({len(parsed)}) — split into batches ≤ 50000.",
+            )
+        for i, n in enumerate(parsed):
+            if not isinstance(n, dict):
+                raise ReaperMCPError(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"note[{i}] must be an object with pitch/velocity/start/end, got {type(n).__name__}",
+                )
+            for k in ("pitch", "velocity", "start", "end"):
+                if k not in n:
+                    raise ReaperMCPError(
+                        ErrorCode.INVALID_PARAMETER,
+                        f"note[{i}] is missing required key '{k}'",
+                    )
+            pitch, vel = n["pitch"], n["velocity"]
+            if not (isinstance(pitch, (int, float)) and 0 <= pitch <= 127):
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"note[{i}].pitch must be 0-127, got {pitch!r}",
+                )
+            if not (isinstance(vel, (int, float)) and 1 <= vel <= 127):
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"note[{i}].velocity must be 1-127, got {vel!r}",
+                )
+            if not (isinstance(n["start"], (int, float)) and isinstance(n["end"], (int, float))):
+                raise ReaperMCPError(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"note[{i}] start/end must be numeric, got {type(n['start']).__name__}/{type(n['end']).__name__}",
+                )
+            if n["end"] <= n["start"]:
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"note[{i}] end ({n['end']}) must be > start ({n['start']})",
+                )
         return await client.execute("midi_insert_notes_batch",
                                     track_index=track_index, item_index=item_index, notes=notes)
 

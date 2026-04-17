@@ -247,7 +247,11 @@ class ReaperStockProfile:
             "name": self.reverb_name,
             "params_by_index": {
                 0: _db_to_reaverbate_wet(reverb_config.get("wet_db", -6.0)),
-                1: 1.0,  # dry at 0dB (bus receives via send, so dry should be off for bus)
+                # Dry OFF — this plugin sits on a return bus; the dry signal
+                # reaches the bus via the send, so non-zero dry here would
+                # double the level. Was previously 1.0 (bug), causing ~3dB
+                # too-loud reverb returns.
+                1: 0.0,
                 2: reverb_config.get("room_size", 0.5),
                 3: reverb_config.get("dampening", 0.5),
                 4: reverb_config.get("width", 1.0),
@@ -388,13 +392,16 @@ class FabFilterProfile:
         """Build an fx_chain entry for Pro-R.
 
         Uses fuzzy param name matching since Pro-R param indices vary by version.
+        Pro-R's "Space" already encodes decay behaviour — we don't set a
+        separate "Decay" because the previous (buggy) version fed room_size
+        into Decay, which collapsed decay time to the default when room_size
+        was small and is redundant when it's large.
         """
         return {
             "name": self.reverb_name,
             "params": {
                 "Space": reverb_config.get("room_size", 0.5),
                 "Brightness": 1.0 - reverb_config.get("dampening", 0.5),
-                "Decay": reverb_config.get("room_size", 0.5),
             },
         }
 

@@ -4,6 +4,85 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+Hardening pass following a full code audit. No API changes — all behaviour
+fixes, validation improvements, and bug fixes.
+
+**Mix engine (critical):**
+- `mix_engine/plugins.py` — ReaVerbate dry gain was hardcoded to 1.0 on reverb
+  return buses, meaning the dry signal passed through the bus alongside the
+  wet tail, doubling the return level (~3 dB too loud). Now 0.0.
+- `mix_engine/plugins.py` — Pro-R `Decay` parameter was being fed `room_size`,
+  which collapsed the decay tail when room_size was small and duplicated Space
+  otherwise. Removed the redundant Decay mapping; Pro-R's Space already
+  encodes decay behaviour.
+- `mix_engine/master.py` — FabFilter Pro-L 2 `Output Level` formula was
+  `0.5 + true_peak_db / 60.0`, which for a target of -1 dBTP produced a
+  ceiling at ~-31 dBTP (limiter barely engaged). Correct formula is
+  `1.0 + true_peak_db / 60.0`, giving a ceiling at -1 dBTP as intended.
+- `mix_engine/__init__.py` — cleanup now logs every FX it removes (at INFO
+  level) plus a summary count, so users can audit what `clean=True` did.
+  Added a `LIMITATION` docstring warning that substring matches on
+  ReaEQ / ReaComp / Pro-Q 3 / Pro-C 2 will also remove user-added instances
+  on tracks being mixed (scoped to `track_indices` only, other tracks safe).
+
+**Core IPC:**
+- `reaper_client.py` — JSON parse-failure retries now require the response
+  file's mtime to CHANGE before counting another failure. Previously a
+  partial mid-write response would hit max_parse_failures in 150 ms even
+  when the real response was still on its way, rejecting legitimate
+  responses under heavy write contention.
+- `reaper_client.py` — `UnicodeDecodeError` is now caught and treated as a
+  parse failure (same retry path). Previously it propagated as an
+  unhandled exception if Lua wrote a byte that wasn't valid UTF-8.
+
+**Lua bridge:**
+- `reaper_mcp_server.lua` — `\uXXXX` JSON escapes are now decoded properly
+  to UTF-8 (was being dropped to `?`). Track / plugin names with accented
+  or CJK characters now round-trip correctly.
+- `reaper_mcp_server.lua` — directory creation no longer uses `os.execute`
+  with a shell-concatenated path. Uses REAPER's native
+  `RecursiveCreateDirectory` API when available (safer against adversarial
+  TMPDIR values), with a defensive-quoted shell fallback for very old REAPER.
+- `reaper_mcp_server.lua` — added `Undo_BeginBlock` / `Undo_EndBlock` wrapping
+  for every MIDI and item/track mutation that lacked it: `midi_insert_note`,
+  `midi_insert_notes_batch`, `midi_set_note`, `midi_delete_note`,
+  `midi_delete_all_notes`, `midi_insert_cc`, `midi_delete_cc`,
+  `item_create_midi`, `track_create`. Undo history in REAPER now shows
+  readable `MCP: …` labels for every change the AI made, so users can
+  undo specific AI edits individually.
+
+**Tool modules:**
+- `tools/patterns_tools.py` — `start_qn` was being applied twice (once to the
+  auto-created item's project position and again to every note inside the
+  item), so patterns appeared at 2 × start_qn instead of start_qn. Now notes
+  are placed relative to the item and the item always starts at project 0
+  when auto-creating; users wanting a specific project position should
+  pre-create the item with `item_create_midi`.
+- `tools/patterns_tools.py` — chord regex now accepts lowercase roots
+  (`"cm7"` parses the same as `"Cm7"`). Previously lowercase chord names
+  silently returned None and were listed under `failed_chords`.
+- `tools/analysis_tools.py` — `analyze_loudness` guards against silent audio
+  (previously returned non-JSON `-inf` LUFS). `analyze_frequency_spectrum`
+  guards against divide-by-zero when magnitudes sum to 0. `analyze_stereo_field`
+  guards against divide-by-zero when either channel is constant / silent
+  (was returning `NaN`, which breaks JSON serialisation).
+- `tools/midi_tools.py` — `midi_insert_notes_batch` now validates the `notes`
+  JSON client-side: parses it, checks shape is a list, enforces 50 000-note
+  ceiling, validates every note has pitch (0-127), velocity (1-127), numeric
+  start/end with end > start. Lua-side errors for malformed batches are now
+  rare; when they happen, users get a precise Python-side message pointing
+  to the bad note index and field.
+- `tools/compose_edit_tools.py` — the "all" sentinel for `tracks=` is now
+  case-insensitive and tolerates surrounding whitespace / quotes. Previously
+  only `"all"`, `'all'`, and `"\"all\""` worked; `" ALL "` or `"All"` fell
+  through to JSON parsing and raised an obscure error.
+
+**Registry:**
+- `tool_registry.py` — after registration, warns if a profile references a
+  module that isn't importable (profile definition out of sync with disk).
+
 ### Added
 
 - **High-affordance pattern tools** (`patterns_tools.py`, 2 tools) — dedicated MCP tools for the most common MIDI writing tasks, so the AI reaches for them directly without having to learn `compose_arrangement`'s shorthand grammar:

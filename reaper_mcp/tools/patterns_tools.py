@@ -77,19 +77,20 @@ _NOTE_OFFSETS = {
     "B": 11, "Cb": 11, "B#": 0,
 }
 
-_CHORD_RE = re.compile(r"^\s*([A-G][#b]?)(.*?)\s*$")
+_CHORD_RE = re.compile(r"^\s*([A-Ga-g][#b]?)(.*?)\s*$")
 
 
 def _parse_chord(name: str, base_octave: int) -> list[int] | None:
     """Return MIDI pitches for a chord like 'Cm7' or 'F#maj9'.
 
-    Unknown chord qualities fall back to major triad. Unknown roots return None.
+    Accepts either case for the root (C or c both map to C). Unknown chord
+    qualities fall back to major triad. Unknown roots return None.
     """
     m = _CHORD_RE.match(name)
     if not m:
         return None
     root_raw, quality = m.group(1), m.group(2).strip()
-    # Normalise Db/Bb/etc (already correct case), title-case the letter.
+    # Normalise: root letter uppercase, accidental kept as-is (# / b).
     root = root_raw[0].upper() + root_raw[1:]
     if root not in _NOTE_OFFSETS:
         return None
@@ -186,6 +187,9 @@ def register(mcp: FastMCP):
                     unknown_chars.add(ch)
                     step_in_lane += 1
                     continue
+                # Note position is WITHIN the item — start_qn is the item's
+                # within-item offset, not an added note offset. Item position
+                # in the project is set separately when auto-creating.
                 start = start_qn + step_in_lane * qn_per_step
                 notes.append({
                     "pitch": pitch,
@@ -210,12 +214,17 @@ def register(mcp: FastMCP):
         if item_index < 0:
             bpm = await _bpm(client)
             total_qn = steps_per_bar * qn_per_step * bar_count
-            length_sec = (total_qn * 60.0 / bpm) + 0.5
-            position_sec = start_qn * 60.0 / bpm
+            # Item length has to contain start_qn offset + the full pattern.
+            item_qn_length = start_qn + total_qn
+            length_sec = (item_qn_length * 60.0 / bpm) + 0.5
+            # Item always placed at project time 0 when auto-creating —
+            # start_qn is the within-item offset, not a project offset.
+            # Users wanting a specific project position should pre-create
+            # an item with `item_create_midi` and pass its index.
             result = await client.execute(
                 "item_create_midi",
                 track_index=track_index,
-                position=position_sec,
+                position=0.0,
                 length=length_sec,
             )
             item_index = int(result.get("item_index", result.get("index", 0)))
@@ -318,12 +327,15 @@ def register(mcp: FastMCP):
         if item_index < 0:
             bpm = await _bpm(client)
             total_qn = chord_duration_qn * len(chord_names)
-            length_sec = (total_qn * 60.0 / bpm) + 0.5
-            position_sec = start_qn * 60.0 / bpm
+            # Item length has to contain start_qn offset + all chords.
+            item_qn_length = start_qn + total_qn
+            length_sec = (item_qn_length * 60.0 / bpm) + 0.5
+            # Item always placed at project time 0 when auto-creating —
+            # start_qn is the within-item offset, not a project offset.
             result = await client.execute(
                 "item_create_midi",
                 track_index=track_index,
-                position=position_sec,
+                position=0.0,
                 length=length_sec,
             )
             item_index = int(result.get("item_index", result.get("index", 0)))

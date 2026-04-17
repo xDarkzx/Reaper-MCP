@@ -323,7 +323,20 @@ async def _run_legacy_pipeline(client, track_map, plugin_profile, suite, clean):
 
 async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
     """Remove previously-added mix EQ/compressor from the given tracks and
-    delete MIX:* reverb buses."""
+    delete MIX:* reverb buses.
+
+    ⚠ LIMITATION: This function removes every ReaEQ / ReaComp / Pro-Q 3 /
+    Pro-C 2 instance on the given tracks — including any the user added
+    manually, since the mix engine doesn't yet mark its own FX with a
+    distinguishing prefix. Operation is scoped to tracks in `track_indices`
+    (only tracks the mix engine is currently processing), so user FX on
+    other tracks is never touched.
+
+    Callers that don't want this behaviour should pass `clean=False` to
+    `engine_mix` / `engine_master`. Future: add an fx_rename handler and
+    tag mix-engine FX with a "[MIX]" prefix.
+    """
+    removed = 0
     for ti in track_indices:
         try:
             chain_result = await client.execute("fx_get_chain", track_index=ti)
@@ -336,10 +349,13 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
                         await client.execute(
                             "fx_remove", track_index=ti, fx_index=fx["index"]
                         )
+                        logger.info("Cleanup: removed %r from track %d", fx_name, ti)
+                        removed += 1
                         break
         except Exception as e:
             logger.warning("Could not clean FX on track %d: %s", ti, e)
 
+    buses_removed = 0
     try:
         all_tracks = await client.execute("track_get_all")
         data = all_tracks.get("data", all_tracks)
@@ -348,8 +364,12 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
             name = t.get("name", "")
             if name.startswith(_REVERB_BUS_PREFIX):
                 await client.execute("track_delete", track_index=t["index"])
+                buses_removed += 1
     except Exception as e:
         logger.warning("Could not clean reverb buses: %s", e)
+
+    if removed or buses_removed:
+        logger.info("Cleanup summary: %d FX removed, %d reverb buses deleted.", removed, buses_removed)
 
 
 async def _clean_mix_fx(client, track_map: dict, plugin_profile) -> None:

@@ -106,6 +106,25 @@ def register_all_tools(mcp: FastMCP):
         banner += f", skipped {len(skipped_by_profile)} (not in profile)"
     sys.stderr.write(banner + "\n")
 
+    # Profile sanity check — if a profile references a module that doesn't
+    # exist on disk, warn so stale profile definitions get caught.
+    if allowed is not None:
+        missing = sorted(allowed - set(registered) - {n for n, _ in failures})
+        # Modules without register() land here too — filter those out.
+        truly_missing = []
+        for name in missing:
+            try:
+                importlib.import_module(f"reaper_mcp.tools.{name}")
+            except ModuleNotFoundError:
+                truly_missing.append(name)
+            except Exception:
+                pass  # some other problem — already surfaced via failures
+        if truly_missing:
+            sys.stderr.write(
+                f"[reaper-mcp] ⚠️  Profile '{profile_name}' references missing "
+                f"module(s): {truly_missing}. Profile definition is out of sync.\n"
+            )
+
     if failures:
         sys.stderr.write(
             f"\n[reaper-mcp] ⚠️  {len(failures)} tool module(s) failed to load: "

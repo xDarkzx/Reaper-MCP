@@ -279,7 +279,15 @@ def _ff_bus_comp(comp: CompProfile) -> dict:
 
 
 def _ff_limiter(spec: MasteringChain) -> dict:
-    """Pro-L 2 — set output ceiling. Style selects limiter character."""
+    """Pro-L 2 — set output ceiling. Style selects limiter character.
+
+    Pro-L 2's "Output Level" 0.0–1.0 maps to -60 dB → 0 dBTP. A target true
+    peak of -1 dBTP is therefore 0.983, not 0.483. The previous formula was
+    `0.5 + true_peak_db / 60.0`, which centred at -30 dBTP and clamped the
+    limiter ceiling ~30 dB below the intended target — the limiter barely
+    engaged. Correct formula: `1.0 + true_peak_db / 60.0` (true_peak_db is
+    always ≤ 0, so value always ≤ 1).
+    """
     style_to_style = {
         "transparent": 0.0,   # Transparent
         "punchy": 0.2,        # Punchy
@@ -289,7 +297,7 @@ def _ff_limiter(spec: MasteringChain) -> dict:
     return {
         "name": "FabFilter Pro-L 2",
         "params": {
-            "Output Level": max(0.0, min(1.0, 0.5 + spec.true_peak_db / 60.0)),
+            "Output Level": max(0.0, min(1.0, 1.0 + spec.true_peak_db / 60.0)),
             "Style": style_to_style.get(spec.limiter_character, 0.0),
         },
     }

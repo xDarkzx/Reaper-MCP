@@ -36,10 +36,19 @@ local function setup_ipc()
       ipc_dir = "/tmp/reaper_mcp"
     end
   end
-  if sep == "\\" then
-    os.execute('mkdir "' .. ipc_dir .. '" 2>nul')
+  -- Use REAPER's native directory API instead of os.execute so an
+  -- adversarial TMPDIR value can't inject shell commands.
+  if reaper.RecursiveCreateDirectory then
+    reaper.RecursiveCreateDirectory(ipc_dir, 0)
   else
-    os.execute('mkdir -p "' .. ipc_dir .. '" 2>/dev/null')
+    -- Very old REAPER fallback: shell mkdir with defensive quoting.
+    -- Replace any embedded quote in the path with underscore.
+    local safe_dir = ipc_dir:gsub('"', "_")
+    if sep == "\\" then
+      os.execute('mkdir "' .. safe_dir .. '" 2>nul')
+    else
+      os.execute('mkdir -p "' .. safe_dir .. '" 2>/dev/null')
+    end
   end
   command_file = ipc_dir .. sep .. "command.json"
   response_file = ipc_dir .. sep .. "response.json"
@@ -198,8 +207,32 @@ local function json_decode(str)
         if mapped then
           result[#result+1] = mapped
         elseif esc_char == 'u' then
-          -- Unicode escape \uXXXX — just pass through as ?
-          result[#result+1] = '?'
+          -- Unicode escape \uXXXX — decode to UTF-8. Surrogate pairs are
+          -- collapsed to '?' (rare in practice for track / plugin names).
+          local hex = sub(str, special + 2, special + 5)
+          local cp = tonumber(hex, 16)
+          if cp then
+            if cp < 0x80 then
+              result[#result+1] = string.char(cp)
+            elseif cp < 0x800 then
+              result[#result+1] = string.char(
+                0xC0 + math.floor(cp / 0x40),
+                0x80 + (cp % 0x40)
+              )
+            elseif cp >= 0xD800 and cp <= 0xDFFF then
+              result[#result+1] = '?'  -- surrogate half
+            elseif cp < 0x10000 then
+              result[#result+1] = string.char(
+                0xE0 + math.floor(cp / 0x1000),
+                0x80 + math.floor((cp % 0x1000) / 0x40),
+                0x80 + (cp % 0x40)
+              )
+            else
+              result[#result+1] = '?'
+            end
+          else
+            result[#result+1] = '?'
+          end
           pos = special + 6
           chunk_start = pos
           goto continue
@@ -664,12 +697,14 @@ end
 function track.track_create(p)
   local idx = p.index or -1
   if idx == -1 then idx = reaper.CountTracks(0) end
+  reaper.Undo_BeginBlock()
   reaper.InsertTrackAtIndex(idx, true)
   local tr = reaper.GetTrack(0, idx)
   if p.name and p.name ~= "" then
     reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", p.name, true)
   end
   reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: track_create " .. (p.name or ""), -1)
   return build_track_info(tr, idx)
 end
 
@@ -1229,8 +1264,12 @@ function item.item_create_midi(p)
   local len = p.length or 60.0  -- default 60s, compose_arrangement auto-calculates
   if pos < 0 then pos = 0 end
   if len <= 0 then len = 60.0 end
+  reaper.Undo_BeginBlock()
   local it = reaper.CreateNewMIDIItemInProj(tr, pos, pos + len, false)
-  if not it then return nil, "Failed to create MIDI item" end
+  if not it then
+    reaper.Undo_EndBlock("MCP: item_create_midi (failed)", -1)
+    return nil, "Failed to create MIDI item"
+  end
   reaper.UpdateArrange()
   -- Find the item index
   local total = reaper.CountMediaItems(0)
@@ -1238,6 +1277,7 @@ function item.item_create_midi(p)
   for i = 0, total - 1 do
     if reaper.GetMediaItem(0, i) == it then item_idx = i; break end
   end
+  reaper.Undo_EndBlock("MCP: item_create_midi", -1)
   return build_item_info(it, item_idx)
 end
 
@@ -1539,8 +1579,10 @@ function midi.midi_insert_note(p)
   if not p.channel or not p.pitch or not p.velocity then return nil, "Missing parameter: channel/pitch/velocity" end
   local startppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.start_position)
   local endppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.end_position)
+  reaper.Undo_BeginBlock()
   reaper.MIDI_InsertNote(take, false, false, startppq, endppq, math.floor(p.channel), math.floor(p.pitch), math.floor(p.velocity), true)
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_insert_note", -1)
   local _, notes, ccs, sysex = reaper.MIDI_CountEvts(take)
   return {
     inserted = {channel = p.channel, pitch = p.pitch, velocity = p.velocity, start = p.start_position, ["end"] = p.end_position},
@@ -1554,6 +1596,7 @@ function midi.midi_insert_notes_batch(p)
   if not p.notes then return nil, "Missing parameter: notes" end
   local notes_data = json_decode(p.notes)
   if not notes_data then return nil, "Invalid notes JSON" end
+  reaper.Undo_BeginBlock()
   reaper.MIDI_DisableSort(take)
   local count = 0
   for _, n in ipairs(notes_data) do
@@ -1567,6 +1610,7 @@ function midi.midi_insert_notes_batch(p)
   end
   reaper.MIDI_Sort(take)
   local _, notes, ccs, sysex = reaper.MIDI_CountEvts(take)
+  reaper.Undo_EndBlock("MCP: midi_insert_notes_batch (" .. count .. " notes)", -1)
   return {inserted_count = count, total_notes = notes, total_ccs = ccs}
 end
 
@@ -1601,8 +1645,10 @@ function midi.midi_set_note(p)
   if p.channel and p.channel >= 0 then ch = math.floor(p.channel) end
   if p.start_position and p.start_position >= 0 then startppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.start_position) end
   if p.end_position and p.end_position >= 0 then endppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.end_position) end
+  reaper.Undo_BeginBlock()
   reaper.MIDI_SetNote(take, ni, sel, muted, startppq, endppq, ch, pitch, vel, true)
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_set_note", -1)
   local s = reaper.MIDI_GetProjTimeFromPPQPos(take, startppq)
   local e = reaper.MIDI_GetProjTimeFromPPQPos(take, endppq)
   return {index = ni, channel = ch, pitch = pitch, velocity = vel, start = s, ["end"] = e}
@@ -1617,8 +1663,10 @@ function midi.midi_delete_note(p)
   local _, _, _, startppq, endppq, ch, pitch, vel = reaper.MIDI_GetNote(take, ni)
   local del_start = reaper.MIDI_GetProjTimeFromPPQPos(take, startppq)
   local del_end = reaper.MIDI_GetProjTimeFromPPQPos(take, endppq)
+  reaper.Undo_BeginBlock()
   reaper.MIDI_DeleteNote(take, ni)
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_delete_note", -1)
   local _, notes = reaper.MIDI_CountEvts(take)
   return {
     deleted_index = ni, remaining_notes = notes,
@@ -1638,8 +1686,10 @@ function midi.midi_delete_all_notes(p)
   local it, take, idx, err = get_midi_take(p)
   if not take then return nil, err end
   local _, count = reaper.MIDI_CountEvts(take)
+  reaper.Undo_BeginBlock()
   for i = count - 1, 0, -1 do reaper.MIDI_DeleteNote(take, i) end
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_delete_all_notes (" .. count .. " notes)", -1)
   return {cleared = true, deleted_count = count}
 end
 
@@ -1653,8 +1703,10 @@ function midi.midi_insert_cc(p)
   local ccnum = clamp(math.floor(p.cc_number), 0, 127)
   local ccval = clamp(math.floor(p.cc_value), 0, 127)
   local ppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.position)
+  reaper.Undo_BeginBlock()
   reaper.MIDI_InsertCC(take, false, false, ppq, 0xB0, ch, ccnum, ccval)
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_insert_cc", -1)
   local _, notes, ccs = reaper.MIDI_CountEvts(take)
   return {inserted = {channel = ch, cc_number = ccnum, cc_value = ccval, position = p.position}, total_ccs = ccs}
 end
@@ -1671,8 +1723,10 @@ function midi.midi_delete_cc(p)
   -- Capture CC info before deleting
   local _, _, _, ppq, _, ch, msg2, msg3 = reaper.MIDI_GetCC(take, ci)
   local del_pos = reaper.MIDI_GetProjTimeFromPPQPos(take, ppq)
+  reaper.Undo_BeginBlock()
   reaper.MIDI_DeleteCC(take, ci)
   reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_delete_cc", -1)
   local _, _, ccs = reaper.MIDI_CountEvts(take)
   return {
     deleted_index = ci, remaining_ccs = ccs,

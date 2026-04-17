@@ -56,39 +56,63 @@ class ReaperClient:
             f.write(msg)
         os.replace(Connection.COMMAND_TMP, Connection.COMMAND_FILE)
 
-        # Poll for response
+        # Poll for response. On parse failure we require the response file's
+        # mtime to CHANGE before retrying — otherwise we're re-reading the
+        # same truncated bytes and will always fail 3 times in a row even
+        # when the real response is on its way.
         deadline = time.monotonic() + timeout
         parse_failures = 0
         max_parse_failures = 3
+        last_parse_fail_mtime: float | None = None
         poll_count = 0
         while time.monotonic() < deadline:
             if os.path.exists(Connection.RESPONSE_FILE):
                 try:
+                    current_mtime = os.path.getmtime(Connection.RESPONSE_FILE)
+                    # If the file hasn't been updated since our last parse
+                    # failure, don't count another failure — just wait.
+                    if last_parse_fail_mtime is not None and current_mtime <= last_parse_fail_mtime:
+                        time.sleep(Timeouts.POLL_INTERVAL)
+                        continue
                     with open(Connection.RESPONSE_FILE, "r", encoding="utf-8") as f:
                         raw = f.read()
                     if raw.strip():
                         try:
                             result = json.loads(raw)
-                            os.remove(Connection.RESPONSE_FILE)
+                            try:
+                                os.remove(Connection.RESPONSE_FILE)
+                            except OSError:
+                                pass
                             return result
-                        except json.JSONDecodeError as dec_err:
+                        except (json.JSONDecodeError, UnicodeDecodeError) as dec_err:
                             parse_failures += 1
+                            last_parse_fail_mtime = current_mtime
                             if parse_failures >= max_parse_failures:
-                                # Best-effort cleanup; ignore if rm fails
                                 try:
                                     os.remove(Connection.RESPONSE_FILE)
                                 except OSError:
                                     pass
                                 raise ReaperMCPError(
                                     ErrorCode.COMMAND_FAILED,
-                                    f"Malformed JSON response from REAPER after "
-                                    f"{parse_failures} attempts (check REAPER console "
-                                    f"for Lua errors): {dec_err}",
+                                    f"Malformed response from REAPER after "
+                                    f"{parse_failures} attempts — check REAPER "
+                                    f"console for Lua errors. Detail: {dec_err}",
                                 )
                             time.sleep(Timeouts.POLL_INTERVAL)
                             continue
                 except OSError:
                     pass
+                except UnicodeDecodeError as dec_err:
+                    # File exists but isn't valid UTF-8 yet — probably mid-write.
+                    parse_failures += 1
+                    if parse_failures >= max_parse_failures:
+                        raise ReaperMCPError(
+                            ErrorCode.COMMAND_FAILED,
+                            f"Response file isn't valid UTF-8 after "
+                            f"{parse_failures} attempts: {dec_err}",
+                        )
+                    time.sleep(Timeouts.POLL_INTERVAL)
+                    continue
             # Check for REAPER crash every ~2 seconds during polling
             poll_count += 1
             if poll_count % 40 == 0 and not os.path.exists(Connection.LOCK_FILE):

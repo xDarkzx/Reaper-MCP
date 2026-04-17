@@ -103,10 +103,29 @@ def register(mcp: FastMCP):
         Returns LUFS target deviation, headroom to 0 dBTP, and a qualitative hint.
         """
         samples, sr = _load_wav(wav_path)
+        if samples.size == 0:
+            raise ReaperMCPError(
+                ErrorCode.COMMAND_FAILED,
+                f"Audio file has no samples: {wav_path}. Render first and retry.",
+            )
         samples_f = samples.astype(np.float64) if samples.dtype != np.float64 else samples
 
         meter = pyln.Meter(sr)
-        integrated_lufs = float(meter.integrated_loudness(samples_f))
+        integrated_lufs_raw = meter.integrated_loudness(samples_f)
+        # pyloudnorm returns -inf for silent files. Report that honestly, don't
+        # let the -inf leak into the JSON response (it's not valid JSON).
+        if not np.isfinite(integrated_lufs_raw):
+            return {
+                "integrated_lufs": None,
+                "true_peak_db": None,
+                "rms_db": None,
+                "crest_factor_db": None,
+                "reference_target_lufs": _LUFS_REFERENCE.get(reference.lower(), -14.0),
+                "reference": reference,
+                "delta_lu": None,
+                "hint": "Audio is silent — nothing to measure. Check the render.",
+            }
+        integrated_lufs = float(integrated_lufs_raw)
 
         mono = _to_mono(samples_f)
         peak_db = _peak_db(mono)
@@ -126,7 +145,7 @@ def register(mcp: FastMCP):
 
         return {
             "integrated_lufs": round(integrated_lufs, 2),
-            "true_peak_db": round(peak_db, 2),
+            "true_peak_db": round(peak_db, 2) if np.isfinite(peak_db) else None,
             "rms_db": round(rms_db, 2) if np.isfinite(rms_db) else None,
             "crest_factor_db": round(crest_db, 2) if crest_db is not None else None,
             "reference_target_lufs": target,
@@ -206,6 +225,16 @@ def register(mcp: FastMCP):
         freqs = np.fft.rfftfreq(mono.size, 1.0 / sr)
         magnitudes = np.abs(fft)
 
+        mag_sum = float(np.sum(magnitudes))
+        if mag_sum <= 0.0:
+            # Silence / DC-only signal — nothing useful to report.
+            return {
+                "sample_rate": sr,
+                "band_energy_db": {},
+                "spectral_centroid_hz": None,
+                "hint": "Signal has no spectral content (silence or DC). Check the render.",
+            }
+
         bands = {
             "sub": (20, 60),
             "bass": (60, 250),
@@ -223,15 +252,17 @@ def register(mcp: FastMCP):
 
         # Normalise against total energy for relative dB.
         total_energy = sum(band_energy.values()) or 1.0
-        band_db = {k: round(10.0 * np.log10(v / total_energy), 2) if v > 0 else -float("inf")
+        band_db = {k: round(10.0 * np.log10(v / total_energy), 2) if v > 0 else None
                    for k, v in band_energy.items()}
 
         # Spectral centroid — rough proxy for perceived brightness.
-        centroid = float(np.sum(freqs * magnitudes) / (np.sum(magnitudes) or 1.0))
+        # mag_sum already > 0 here (guard above), so this is safe.
+        centroid = float(np.sum(freqs * magnitudes) / mag_sum)
 
-        # Qualitative balance hint.
-        low_energy = band_db["sub"] + band_db["bass"]
-        high_energy = band_db["presence"] + band_db["brilliance"]
+        # Qualitative balance hint — guard against None entries from silent bands.
+        def _bd(k): return band_db.get(k) or 0.0
+        low_energy = _bd("sub") + _bd("bass")
+        high_energy = _bd("presence") + _bd("brilliance")
         if low_energy - high_energy > 6:
             hint = "Low-heavy — consider a high-shelf boost or bass cut."
         elif high_energy - low_energy > 6:
@@ -271,11 +302,27 @@ def register(mcp: FastMCP):
         left = samples[:, 0].astype(np.float64)
         right = samples[:, 1].astype(np.float64)
 
-        # Phase correlation via Pearson across the full signal.
+        if left.size == 0:
+            raise ReaperMCPError(ErrorCode.COMMAND_FAILED, "Empty audio file.")
+
+        # Phase correlation via Pearson across the full signal. Guard against
+        # one-or-both channels being constant (denom = 0 → NaN), which would
+        # break JSON serialisation.
         l_centered = left - left.mean()
         r_centered = right - right.mean()
-        denom = np.sqrt(np.sum(l_centered ** 2) * np.sum(r_centered ** 2))
-        correlation = float(np.sum(l_centered * r_centered) / denom) if denom > 0 else 0.0
+        denom = float(np.sqrt(np.sum(l_centered ** 2) * np.sum(r_centered ** 2)))
+        if denom <= 0.0:
+            # One or both channels are constant (e.g., all zeros / DC).
+            return {
+                "is_stereo": True,
+                "sample_rate": sr,
+                "phase_correlation": None,
+                "mid_rms": 0.0,
+                "side_rms": 0.0,
+                "side_to_mid_ratio": None,
+                "hint": "One or both channels are silent/constant — correlation undefined.",
+            }
+        correlation = float(np.sum(l_centered * r_centered) / denom)
 
         # Mid / side split.
         mid = (left + right) * 0.5
