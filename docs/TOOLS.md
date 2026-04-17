@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **162 tools across 25 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **163 tools across 25 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,8 +12,8 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 25 | 162 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 16 | ~118 | Writing or editing music (incl. patterns, loops, vocal chops). Drops FX, mix, sidechain, analysis. |
+| `full` | 25 | 163 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 16 | ~119 | Writing or editing music (incl. patterns, loops, vocal chops). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~40 | Smoke test / basic control surface. |
@@ -69,7 +69,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
 | [Patterns](#patterns) | `patterns_tools.py` | 2 |
 | [Loop Library](#loop-library) | `loops_tools.py` | 3 |
-| [Vocal Chops](#vocal-chops) | `chops_tools.py` | 9 |
+| [Vocal Chops](#vocal-chops) | `chops_tools.py` | 10 |
 | [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
@@ -448,8 +448,14 @@ The intended workflow: **user manually loads an audio item on a track in REAPER*
 | Tool | Description |
 |------|-------------|
 | `analyze_chop_set(item_indices)` | Inspect a list of chops, classify each by duration (`hit` / `staccato` / `syllable` / `sustain`), return summary stats. Helps the AI decide which chops fit which musical role without doing audio content analysis. |
-| `arrange_chops_to_chord_tones(item_indices, chord_progression, beats_per_chord=4, bpm=0, layout="follow", source_root="C")` | For each chop in playback order, calculate the chord tone it should hit (based on time position + the supplied chord progression) and pitch-shift it via `take_set_pitch`. Layouts: `follow` (cycles root/3rd/5th), `ascending` (climbs chord tones), `porter` (root/5th/octave bounce — Porter Robinson signature), `root` (every chop = root). |
+| `arrange_chops_to_chord_tones(item_indices, chord_progression, beats_per_chord=4, bpm=0, layout="follow", source_root="C")` | Pitch-in-place helper. For each chop in playback order, calculate the chord tone it should hit and shift it via `take_set_pitch`. Layouts: `follow` / `ascending` / `porter` / `root`. NOT a rearranger — use `chop_pipeline` for the real chop sequencer. |
 | `stack_chop_layers(item_indices, intervals_semitones="[7, 12]")` | For each chop, create overlay clones at parallel pitch intervals on the same track. The classic future-bass stack: original + 5th + octave. Best applied to a SUBSET of chops, not every one. |
+
+**Phase 3 — end-to-end pipeline** (the magic button):
+
+| Tool | Description |
+|------|-------------|
+| `chop_pipeline(vocal_item_index, chord_progression, bpm=0, bars=4, style="chillstep", target_track_name="Vocal Chops", mute_original=True, source_key="C", seed=0)` | **One-shot vocal chop arrangement.** Creates a NEW track, places REORDERED slices from the source vocal on a rhythmic grid per style, pitches each to a chord tone, adds Porter-style stutters + harmony stacks, applies 5ms fades, mutes the original. Styles: `chillstep` (sparse atmospheric 6/16), `future_bass` (dense melodic 11/16), `porter` (syncopated bursts 9/16), `trap` (percussive 7/16). The AI just calls it once — the tool encodes chop production craft internally. |
 
 **Typical AI workflow** for vocal chops (with Phase 2 helpers):
 

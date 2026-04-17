@@ -1588,6 +1588,121 @@ function item.item_duplicate(p)
   }
 end
 
+-- Return the source file path, duration, and take offset for an item.
+-- Used by chop_pipeline to know where to read source audio from.
+function item.item_get_source_info(p)
+  if p.item_index == nil then return nil, "Missing parameter: item_index" end
+  local idx = math.floor(p.item_index)
+  local it = reaper.GetMediaItem(0, idx)
+  if not it then return nil, "Item not found" end
+
+  local take = reaper.GetActiveTake(it)
+  if not take then return nil, "Item has no active take" end
+
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return nil, "Take has no source" end
+
+  local _, filename = reaper.GetMediaSourceFileName(src, "")
+  local src_length, is_qn = reaper.GetMediaSourceLength(src)
+  if is_qn then
+    local bpm = reaper.Master_GetTempo()
+    if bpm > 0 then src_length = src_length * (60.0 / bpm) end
+  end
+
+  return {
+    item_index = idx,
+    source_file = filename or "",
+    source_length_sec = src_length,
+    take_start_offset_sec = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS"),
+    take_pitch_semis = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH"),
+    take_playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE"),
+    item_position_sec = reaper.GetMediaItemInfo_Value(it, "D_POSITION"),
+    item_length_sec = reaper.GetMediaItemInfo_Value(it, "D_LENGTH"),
+    track_index = math.floor(reaper.GetMediaTrackInfo_Value(reaper.GetMediaItem_Track(it), "IP_TRACKNUMBER") - 1),
+  }
+end
+
+-- Create a "virtual slice" item on a target track — a new item that
+-- references the SAME source file as a given source item, but plays a
+-- specific time range of the source at a given pitch with micro-fades.
+-- This is the building block of chop_pipeline: one call places one chop
+-- onto the target track, no bouncing / rendering required.
+function item.chops_create_virtual_slice(p)
+  if p.source_item_index == nil then return nil, "Missing: source_item_index" end
+  if p.target_track_index == nil then return nil, "Missing: target_track_index" end
+  if p.target_position_sec == nil then return nil, "Missing: target_position_sec" end
+  if p.source_offset_sec == nil then return nil, "Missing: source_offset_sec" end
+  if p.length_sec == nil or p.length_sec <= 0 then return nil, "length_sec must be > 0" end
+
+  local src_idx = math.floor(p.source_item_index)
+  local src_item = reaper.GetMediaItem(0, src_idx)
+  if not src_item then return nil, "Source item not found" end
+  local src_take = reaper.GetActiveTake(src_item)
+  if not src_take then return nil, "Source item has no take" end
+  local src_source = reaper.GetMediaItemTake_Source(src_take)
+  if not src_source then return nil, "Source take has no PCM source" end
+  local _, src_filename = reaper.GetMediaSourceFileName(src_source, "")
+  if not src_filename or src_filename == "" then
+    return nil, "Source is not a file-backed PCM source"
+  end
+
+  local tr_idx = math.floor(p.target_track_index)
+  local target_track = reaper.GetTrack(0, tr_idx)
+  if not target_track then return nil, "Target track not found" end
+
+  local target_pos = p.target_position_sec
+  if target_pos < 0 then target_pos = 0 end
+
+  reaper.Undo_BeginBlock()
+
+  local count_before = reaper.CountMediaItems(0)
+  local new_item = reaper.AddMediaItemToTrack(target_track)
+  if not new_item then
+    reaper.Undo_EndBlock("MCP: chops_create_virtual_slice (fail)", -1)
+    return nil, "Failed to create item"
+  end
+  local new_take = reaper.AddTakeToMediaItem(new_item)
+  if not new_take then
+    reaper.Undo_EndBlock("MCP: chops_create_virtual_slice (fail)", -1)
+    return nil, "Failed to create take"
+  end
+
+  local fresh_source = reaper.PCM_Source_CreateFromFile(src_filename)
+  if not fresh_source then
+    reaper.Undo_EndBlock("MCP: chops_create_virtual_slice (fail)", -1)
+    return nil, "Failed to create PCM source from: " .. src_filename
+  end
+  reaper.SetMediaItemTake_Source(new_take, fresh_source)
+
+  reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", target_pos)
+  reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", p.length_sec)
+  reaper.SetMediaItemTakeInfo_Value(new_take, "D_STARTOFFS", p.source_offset_sec)
+
+  if p.pitch_semis and p.pitch_semis ~= 0 then
+    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", p.pitch_semis)
+  end
+
+  -- Micro-fades to kill zero-crossing clicks on chop edges.
+  local fade_len = p.fade_len_sec or 0.005
+  if fade_len > 0 then
+    reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", fade_len)
+    reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fade_len)
+  end
+
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MCP: chops_create_virtual_slice", -1)
+
+  return {
+    source_item_index = src_idx,
+    new_item_index = count_before,
+    target_track_index = tr_idx,
+    target_position_sec = target_pos,
+    source_offset_sec = p.source_offset_sec,
+    length_sec = p.length_sec,
+    pitch_semis = p.pitch_semis or 0,
+  }
+end
+
 -- Clone an item to a specific position, optionally on a different track.
 -- Used by stack_chop_layers to overlay copies at the same position with
 -- different pitch shifts (root + 5th + octave harmonized stack).
