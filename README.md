@@ -23,7 +23,7 @@
 
 ---
 
-ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **150 tools across 23 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
+ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **153 tools across 24 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), loop-library pipeline (scan folder → pick by BPM/key → load into REAPER), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
 **ReaperMCP itself runs entirely on your machine** via a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI never leave your computer. The AI "brain" naturally lives wherever you already run it: Claude Desktop / Claude Code / Cursor / Antigravity / any MCP client. You bring the AI, ReaperMCP handles REAPER.
 
@@ -106,7 +106,7 @@ Open your AI client and start talking:
 
 ## Features
 
-### 150 Tools Across 23 Modules
+### 153 Tools Across 24 Modules
 
 | Category | Tools | Highlights |
 |----------|------:|------------|
@@ -131,6 +131,7 @@ Open your AI client and start talking:
 | **Composition Utility** | 3 | `get_track_instruments`, `analyze_score`, `compose_arrangement` (small batch insert) |
 | **Composition Editing** | 9 | `wipe_all_midi`, `reset_composition`, `configure_tracks`, `setup_routing`, `add_markers_batch`, `rewrite_cc`, `edit_section`, `setup_fx_chain`, `setup_effect_bus` |
 | **Patterns** | 2 | `create_drum_pattern` (multi-lane step-sequencer notation), `create_chord_progression` (parses `"Cm7, Fm7, Bb7, Eb"` into voiced MIDI) |
+| **Loop Library** | 3 | `scan_audio_folder` (parse BPM / key / role from filenames), `detect_common_bpm`, `load_loops` (batch-create tracks + load stems). Point at a sample-pack folder and the AI builds a track from it. |
 | **Audio Analysis** | 4 | `analyze_loudness` (LUFS vs. streaming/broadcast/cinema target), `analyze_clipping`, `analyze_frequency_spectrum`, `analyze_stereo_field` — objective mix metrics for `measure → correct` loops. Optional extras: `pip install 'reaper-mcp[analysis]'` |
 | **Demo** | 1 | `demo_edm_project` — one-shot full-project demo render (smoke test + reference) |
 
@@ -142,8 +143,8 @@ The default 147-tool surface is designed for full-featured frontier models. Smal
 
 | Profile | Tools | For |
 |---------|------:|-----|
-| `full` *(default)* | ~149 | Frontier models — Claude, GPT-4, Gemini |
-| `composition` | ~106 | Writing / editing music (includes patterns) |
+| `full` *(default)* | ~153 | Frontier models — Claude, GPT-4, Gemini |
+| `composition` | ~109 | Writing / editing music (includes patterns + loops) |
 | `mixing` | ~67 | Mixing, mastering, bus pipelines |
 | `analysis` | ~47 | Inspect + measure only |
 | `minimal` | ~40 | Smoke test / basic control |
@@ -241,7 +242,7 @@ Reaper-MCP/
 │   │       ├── pop.py              # 4 pop subgenres
 │   │       ├── electronic.py       # synthwave, lofi, ambient, hiphop
 │   │       └── _shared.py          # Shared role → EQ/comp library
-│   └── tools/                      # 23 modules, 149 auto-registered tools
+│   └── tools/                      # 24 modules, 153 auto-registered tools
 │       ├── transport_tools.py      # Playback and recording (11)
 │       ├── track_tools.py          # Track management + freeze (18)
 │       ├── template_tools.py       # Track templates (4)
@@ -263,6 +264,7 @@ Reaper-MCP/
 │       ├── compose_tools.py        # get_track_instruments, analyze_score, compose_arrangement (3)
 │       ├── compose_edit_tools.py   # wipe_all_midi, edit_section, rewrite_cc, … (9)
 │       ├── patterns_tools.py       # create_drum_pattern, create_chord_progression (2)
+│       ├── loops_tools.py          # scan_audio_folder, detect_common_bpm, load_loops (3)
 │       ├── analysis_tools.py       # LUFS, clipping, spectrum, stereo field (4, optional deps)
 │       ├── demo_tools.py           # demo_edm_project (1)
 │       └── compose_helpers.py      # Shared helpers (no tools)

@@ -6,6 +6,12 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **Loop-library pipeline** (`loops_tools.py`, 3 tools) — point the AI at a sample-pack folder (Prime Loops, Splice, Loopmasters, Native Instruments Expansions) and it builds a working REAPER session from the loops it finds:
+  - `scan_audio_folder(path, recursive=True, max_files=500)` — walks a folder, parses BPM / key / role from each filename via regex (`Kick_140BPM_Am_01.wav` → `bpm=140, key="Am", role="kick"`). Returns distribution summary so the AI sees the dominant tempo / key cluster at a glance. Handles `.wav`, `.mp3`, `.flac`, `.aif`, `.aiff`, `.ogg`, `.m4a`.
+  - `detect_common_bpm(file_paths)` — given a JSON array of paths, returns the most common BPM with per-value vote counts and a confidence score.
+  - `load_loops(loops, project_bpm=0)` — batch-load loops onto auto-created tracks. Finds or creates a track by name for each entry, sets project BPM if provided, returns per-entry errors without aborting the batch.
+  - Uses only stdlib + (optional) soundfile for duration; no librosa / heavy DSP required.
+  - Typical pipeline: `scan_audio_folder` → Claude picks loops → `transport_set_bpm` → `load_loops` → `engine_mix(style)` → `engine_master(style)`. Tool surface: 150 → 153.
 - **`fx_rename(track_index, fx_index, new_name)`** — new tool + Lua handler
   (`TrackFX_SetNamedConfigParm("renamed_name", …)`) for renaming an FX's
   display label. Used internally by the mix engine to tag its own FX with

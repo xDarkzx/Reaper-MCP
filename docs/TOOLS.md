@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **150 tools across 23 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **153 tools across 24 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,8 +12,8 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 23 | 150 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 14 | ~106 | Writing or editing music (incl. patterns). Drops FX, mix, sidechain, analysis. |
+| `full` | 24 | 153 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 15 | ~109 | Writing or editing music (incl. patterns and loops). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~40 | Smoke test / basic control surface. |
@@ -68,6 +68,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Composition Utility](#composition-utility) | `compose_tools.py` | 3 |
 | [Composition Editing](#composition-editing) | `compose_edit_tools.py` | 9 |
 | [Patterns](#patterns) | `patterns_tools.py` | 2 |
+| [Loop Library](#loop-library) | `loops_tools.py` | 3 |
 | [Audio Analysis](#audio-analysis) | `analysis_tools.py` | 4 |
 | [Demo](#demo) | `demo_tools.py` | 1 |
 
@@ -393,6 +394,38 @@ h.h.h.h.h.h.h.h.
 ```
 
 Both tools return a `hint` field suggesting the AI's next step (e.g., *"Call midi_humanize() for timing variation"*).
+
+## Loop Library
+
+Point the AI at a sample-pack folder and have it scan, pick, and load loops into REAPER. Designed for well-labelled packs (Prime Loops, Splice, Loopmasters, Native Instruments Expansions) where BPM / key / role are encoded in filenames like `Kick_140BPM_Am_01.wav` or `Deep Sub Bass 128 F#m Loop.wav`. Source: `loops_tools.py`.
+
+| Tool | Description |
+|------|-------------|
+| `scan_audio_folder(path, recursive=True, max_files=500)` | Walk a folder for audio files (.wav, .mp3, .flac, .aif, .ogg, .m4a). Parses BPM / key / role (kick / bass / pad / lead / fx / vocal / perc / snare / hat / …) from each filename. Returns distribution summary + per-file parsed metadata + a `hint` suggesting the next tool call. |
+| `detect_common_bpm(file_paths)` | Given a JSON array of paths, return the most common BPM across their filenames. Use after picking candidate loops to decide what to pass to `transport_set_bpm`. |
+| `load_loops(loops, project_bpm=0)` | Batch-load audio loops into REAPER on auto-created tracks. Each entry in the JSON array: `{track_name, file_path, position_sec=0}`. If `project_bpm > 0`, sets project tempo first so loops align with the grid. Returns tracks created / reused plus per-entry errors. |
+
+**Typical AI pipeline:**
+
+```
+scan_audio_folder("D:/Music Production/Chillstep Express")
+  → 87 files, mostly 140 BPM Am, clusters by role
+
+detect_common_bpm([selected_paths])
+  → 140
+
+load_loops([
+    {"track_name":"Kick", "file_path":"...", "position_sec":0},
+    {"track_name":"Bass", "file_path":"...", "position_sec":0},
+    {"track_name":"Pad",  "file_path":"...", "position_sec":0},
+    ...
+], project_bpm=140)
+
+engine_mix("future_bass")
+engine_master("future_bass")
+```
+
+No librosa / soundfile required. Filename parsing alone handles the 80% case for professionally-labelled sample packs. Files without parseable metadata are still scanned; their fields are null and the AI can skip them.
 
 ## Audio Analysis
 
