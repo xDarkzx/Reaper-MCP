@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **149 tools across 23 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **150 tools across 23 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,7 +12,7 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 23 | 149 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `full` | 23 | 150 | Default. You're on Claude / GPT-4 / Gemini-class models. |
 | `composition` | 14 | ~106 | Writing or editing music (incl. patterns). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~67 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~47 | Inspect and measure only. Read-mostly workflow. |
@@ -60,7 +60,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Envelopes](#envelopes) | `envelope_tools.py` | 3 |
 | [Selection](#selection) | `selection_tools.py` | 9 |
 | [Sends & Routing](#sends--routing) | `send_tools.py` | 7 |
-| [FX](#fx) | `fx_tools.py` | 14 |
+| [FX](#fx) | `fx_tools.py` | 15 |
 | [FX Inventory](#fx-inventory) | `inventory_tools.py` | 2 |
 | [Mix & Master](#mix--master) | `mix_tools.py` | 3 |
 | [Sidechain](#sidechain) | `sidechain_tools.py` | 1 |
@@ -294,6 +294,7 @@ Add, remove, configure plugins; read/write parameters; manage presets. Source: `
 | `fx_navigate_preset(track_index, fx_index, direction)` | Step next/previous preset (`direction` = -1 or 1). |
 | `fx_get_instrument(track_index)` | Detect which VSTi (if any) is on a track. |
 | `fx_move(track_index, fx_index, new_index)` | Reorder plugins within a chain. |
+| `fx_rename(track_index, fx_index, new_name)` | Rename an FX instance's display label (cosmetic — plugin unchanged). Used by the mix engine to tag its own FX with `[MIX] ` so cleanup can find them without touching user-added FX. Requires REAPER 6.37+. |
 
 ## FX Inventory
 

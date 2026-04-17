@@ -23,7 +23,7 @@
 
 ---
 
-ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **149 tools across 23 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
+ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **150 tools across 23 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
 **ReaperMCP itself runs entirely on your machine** via a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI never leave your computer. The AI "brain" naturally lives wherever you already run it: Claude Desktop / Claude Code / Cursor / Antigravity / any MCP client. You bring the AI, ReaperMCP handles REAPER.
 
@@ -106,7 +106,7 @@ Open your AI client and start talking:
 
 ## Features
 
-### 149 Tools Across 23 Modules
+### 150 Tools Across 23 Modules
 
 | Category | Tools | Highlights |
 |----------|------:|------------|
@@ -123,7 +123,7 @@ Open your AI client and start talking:
 | **Envelopes** | 3 | Read, write, and clear automation envelopes (track / item / FX-param) |
 | **Selection** | 9 | Time selection, loop points, select/deselect all items/tracks, get selected |
 | **Sends & Routing** | 7 | Create/remove sends, set volume/pan/mute, full routing diagram |
-| **FX** | 14 | Add/remove plugins, get/set parameters, presets, enable/disable, show UI, find instrument, move within chain |
+| **FX** | 15 | Add/remove plugins, get/set parameters, presets, enable/disable, show UI, find instrument, move within chain, rename display label |
 | **FX Inventory** | 2 | `fx_list_installed` (detects FabFilter / Waves / iZotope / Valhalla / racks), `set_fx_preferences` |
 | **Mix & Master** | 3 | `engine_mix`, `engine_master`, `engine_fix_mix` — 25 style profiles across EDM / Rock / Pop / Electronic |
 | **Sidechain** | 1 | `setup_sidechain` — pin-mapped kick→bass/pad pumping with a single amount dial |
