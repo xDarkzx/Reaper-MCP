@@ -1602,8 +1602,20 @@ function item.item_get_source_info(p)
   local src = reaper.GetMediaItemTake_Source(take)
   if not src then return nil, "Take has no source" end
 
-  local _, filename = reaper.GetMediaSourceFileName(src, "")
-  local src_length, is_qn = reaper.GetMediaSourceLength(src)
+  -- SECTION / reverse sources wrap the real file — walk up to the root.
+  local root = src
+  for _ = 1, 8 do
+    local parent = reaper.GetMediaSourceParent(root)
+    if not parent then break end
+    root = parent
+  end
+
+  local filename = reaper.GetMediaSourceFileName(root, "")
+  if type(filename) ~= "string" or filename == "" then
+    local _, fn2 = reaper.GetMediaSourceFileName(root, "")
+    filename = fn2 or ""
+  end
+  local src_length, is_qn = reaper.GetMediaSourceLength(root)
   if is_qn then
     local bpm = reaper.Master_GetTempo()
     if bpm > 0 then src_length = src_length * (60.0 / bpm) end
@@ -1641,7 +1653,17 @@ function item.chops_create_virtual_slice(p)
   if not src_take then return nil, "Source item has no take" end
   local src_source = reaper.GetMediaItemTake_Source(src_take)
   if not src_source then return nil, "Source take has no PCM source" end
-  local _, src_filename = reaper.GetMediaSourceFileName(src_source, "")
+  local src_root = src_source
+  for _ = 1, 8 do
+    local parent = reaper.GetMediaSourceParent(src_root)
+    if not parent then break end
+    src_root = parent
+  end
+  local src_filename = reaper.GetMediaSourceFileName(src_root, "")
+  if type(src_filename) ~= "string" or src_filename == "" then
+    local _, fn2 = reaper.GetMediaSourceFileName(src_root, "")
+    src_filename = fn2 or ""
+  end
   if not src_filename or src_filename == "" then
     return nil, "Source is not a file-backed PCM source"
   end
@@ -1682,6 +1704,14 @@ function item.chops_create_virtual_slice(p)
     reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", p.pitch_semis)
   end
 
+  -- Playrate pass-through: when source is at a different BPM than the
+  -- project, the pipeline passes the source item's existing playrate so
+  -- derived chops stay in-tempo (e.g. 128 BPM vocal → 96 BPM project
+  -- uses playrate 0.75). Default 1.0 = source plays at its native rate.
+  if p.playrate and p.playrate > 0 and p.playrate ~= 1.0 then
+    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", p.playrate)
+  end
+
   -- Micro-fades to kill zero-crossing clicks on chop edges.
   local fade_len = p.fade_len_sec or 0.005
   if fade_len > 0 then
@@ -1700,6 +1730,7 @@ function item.chops_create_virtual_slice(p)
     source_offset_sec = p.source_offset_sec,
     length_sec = p.length_sec,
     pitch_semis = p.pitch_semis or 0,
+    playrate = p.playrate or 1.0,
   }
 end
 

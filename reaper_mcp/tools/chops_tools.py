@@ -31,45 +31,61 @@ from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 
 # ─────────────────── Chop pipeline style library ─────────────────────
-# Each style encodes the RHYTHMIC FEEL of a vocal-chop genre: which 1/16
-# slots get chops vs. gaps, how to pitch them, and how often to stack
-# harmonies. These are the "opinions" of the pipeline — they encode chop
-# production craft so the AI doesn't have to re-derive it per call.
+# Per-style config is density + layering — NOT a sparse slot mask.
+# Every slot is filled contiguously (chop length = slot length) so the
+# listener never hears gaps of silence between chops. Styles differ by:
+#   - grid_per_bar: 1/16 (dense, modern EDM), 1/8 (chillstep phrases),
+#                   1/32 (stutter-heavy / Mura Masa).
+#   - stutter_slots: slots to replace with rapid sub-chops (same slot time).
+#   - bar_reorder:  "permuted" = each bar reshuffles source-slice order
+#                    for variation; "sequential" = natural phrase flow.
+#   - layer_intervals: extra harmony tracks built as SEPARATE child tracks
+#                      (octave + fifth), not same-track overlays.
 #
-# Pattern is a list of 16 slots per bar (0 = rest, 1 = chop). A different
-# pattern + density + layout combination gives each genre its signature.
+# Uniform pitch transpose (source_key → target_key) is applied per-pipeline,
+# not per-slot. Per-slot retuning is explicitly rejected by the design.
 _STYLE_CONFIGS = {
-    # Sparse, atmospheric. Room between chops. Lower density (~6/16).
-    "chillstep": {
-        "pattern_per_bar": [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,1,0,0],
-        "layout": "follow",
-        "stack_harmony_chance": 0.20,
-        "stutter_slots_per_bar": [],           # no built-in stutters
-        "slice_grid_per_bar": 16,              # 1/16 slices from source
-    },
-    # Dense, melodic, stutter-capable. ~11/16 density. Porter-style bounce.
     "future_bass": {
-        "pattern_per_bar": [1,0,1,0, 1,0,1,1, 1,0,1,0, 1,1,1,1],
-        "layout": "porter",
-        "stack_harmony_chance": 0.40,
-        "stutter_slots_per_bar": [12, 15],      # 1/16-note rolls at slots 13 & 16
-        "slice_grid_per_bar": 16,
+        "grid_per_bar": 16,
+        "stutter_slots_per_bar": [12, 15],
+        "bar_reorder": "permuted",
+        "layer_intervals": [12, 7],           # octave + fifth stacks
+        "layer_volumes_db": [-9, -12],
     },
-    # Heavy syncopation with stutter clusters. Porter Robinson signature.
+    "chillstep": {
+        "grid_per_bar": 8,                    # longer chops, phrase feel
+        "stutter_slots_per_bar": [],
+        "bar_reorder": "sequential",
+        "layer_intervals": [],
+        "layer_volumes_db": [],
+    },
     "porter": {
-        "pattern_per_bar": [1,0,1,1, 0,1,0,1, 1,1,0,1, 0,1,0,0],
-        "layout": "porter",
-        "stack_harmony_chance": 0.30,
-        "stutter_slots_per_bar": [2, 8, 11],    # multi-slot stutter bursts
-        "slice_grid_per_bar": 16,
+        "grid_per_bar": 16,
+        "stutter_slots_per_bar": [4, 8, 12],
+        "bar_reorder": "permuted",
+        "layer_intervals": [12],              # octave only
+        "layer_volumes_db": [-9],
     },
-    # Trap: sparse with percussive bursts. Chops as rhythm element.
     "trap": {
-        "pattern_per_bar": [1,0,0,0, 0,0,1,1, 0,1,0,0, 1,0,1,1],
-        "layout": "root",
-        "stack_harmony_chance": 0.10,
-        "stutter_slots_per_bar": [6, 14],       # triplet bursts at snare / fill slots
-        "slice_grid_per_bar": 16,
+        "grid_per_bar": 16,
+        "stutter_slots_per_bar": [14],
+        "bar_reorder": "permuted",
+        "layer_intervals": [],
+        "layer_volumes_db": [],
+    },
+    "mura_masa": {
+        "grid_per_bar": 32,                   # 1/32 — tight stutter density
+        "stutter_slots_per_bar": [],
+        "bar_reorder": "permuted",
+        "layer_intervals": [12],
+        "layer_volumes_db": [-12],
+    },
+    "odesza": {
+        "grid_per_bar": 8,
+        "stutter_slots_per_bar": [],
+        "bar_reorder": "sequential",
+        "layer_intervals": [],
+        "layer_volumes_db": [],
     },
 }
 
@@ -118,6 +134,36 @@ def _split_chord_list(chords: str) -> list[str]:
     cleaned = re.sub(r"\s*[-|]\s*", ",", chords)
     parts = re.split(r"[,\n]", cleaned)
     return [p.strip() for p in parts if p.strip()]
+
+
+_KEY_RE = re.compile(r"^\s*([A-Ga-g][#b]?)\s*(m|min|minor|maj|major|Maj)?\s*$")
+
+
+def _parse_key(s: str) -> int | None:
+    """Parse a key name like `Am`, `A minor`, `C#`, `Ebm` → root semitone (0-11).
+
+    Mode ("m" / "maj") is accepted but ignored — we only need the root for
+    uniform transpose math. Returns None if unparseable.
+    """
+    m = _KEY_RE.match(s or "")
+    if not m:
+        return None
+    root_raw = m.group(1)
+    root = root_raw[0].upper() + (root_raw[1:] if len(root_raw) > 1 else "")
+    return _NOTE_OFFSETS.get(root)
+
+
+def _shortest_shift(source_semi: int, target_semi: int) -> int:
+    """Shortest signed semitone shift from source to target (range -5..+6).
+
+    Keeps transpose within tritone bounds so formant-preserved pitch shift
+    stays acceptable. Caller is responsible for deciding whether to apply
+    further clamping (e.g. ±5 with formant, ±2 without).
+    """
+    diff = (target_semi - source_semi) % 12
+    if diff > 6:
+        diff -= 12
+    return diff
 
 
 def register(mcp: FastMCP):
@@ -410,12 +456,22 @@ def register(mcp: FastMCP):
         layout: str = "follow",
         source_root: str = "C",
     ) -> dict:
-        """For each chop in playback order, pitch-shift it to a chord tone.
+        """[NICHE] Retune each chop to a chord tone.
 
-        Walks the chops in their current playback order. For each chop,
-        determines which chord it falls within (based on its time
-        position) and picks a chord tone according to `layout`. Applies
-        the pitch shift via `take_set_pitch`.
+        ⚠️  WARNING: This is NOT how professional vocal chops are made.
+        Per-slice chord-tone retuning smears vocal formants and sounds
+        unnatural. `chop_pipeline` uses uniform transpose instead, which
+        is the correct default for EDM vocal chops.
+
+        This tool is kept for stylized experimental use (e.g., glitch /
+        granular / heavily-processed chop effects where the pitched-up-
+        demon-voice sound is the desired character). DO NOT use it as
+        your default chop workflow.
+
+        Walks the chops in playback order. For each chop, determines
+        which chord it falls within (based on its time position) and
+        picks a chord tone according to `layout`. Applies the pitch
+        shift via `take_set_pitch`.
 
         Args:
             item_indices: JSON array of chop item indices (in playback order).
@@ -577,60 +633,67 @@ def register(mcp: FastMCP):
     @mcp.tool()
     async def chop_pipeline(
         vocal_item_index: int,
-        chord_progression: str,
+        chord_progression: str = "",
         bpm: float = 0.0,
         bars: int = 4,
-        style: str = "chillstep",
+        style: str = "future_bass",
         target_track_name: str = "Vocal Chops",
         mute_original: bool = True,
         source_key: str = "C",
+        target_key: str = "",
+        mode: str = "slice-preserve",
         seed: int = 0,
     ) -> dict:
-        """End-to-end vocal-chop arrangement.
+        """End-to-end vocal-chop arrangement (redesigned for pro workflow).
 
-        Point this at a vocal item and it produces a real chopped
-        arrangement on a NEW track:
+        Produces a contiguous, key-matched, professionally-structured chop
+        arrangement on a new track. Follows researched EDM vocal-chop rules:
 
-          1. Reads the source file from the vocal item.
-          2. Generates 1/16-note candidate slices from the source.
-          3. Creates a "Vocal Chops" target track.
-          4. Applies the style's rhythmic pattern (which slots get chops
-             vs. gaps), placing virtual-slice items on the new track —
-             not re-playing the original vocal timeline.
-          5. Reorders slices across the pattern so the arrangement is not
-             just a sequential playback (each bar pulls from a different
-             starting offset in the source, giving it variety).
-          6. Pitches each placement to a chord tone of the current chord
-             in `chord_progression` using the style's `layout`
-             (follow / porter / ascending / root).
-          7. Optionally stutters specific slots for the Porter / trap
-             signature rhythm bursts.
-          8. Probabilistically stacks a 5th + octave harmony on standout
-             placements (per style's stack-chance).
-          9. Applies 5ms fades on every chop edge to kill clicks.
-         10. Mutes the original vocal track so only the chops play.
+          • CHOPS ARE CONTIGUOUS — every slot filled wall-to-wall, no
+            silence gaps. Slot length is determined by the grid.
+          • PITCH IS UNIFORM — the whole chop set is transposed ONCE to
+            match the track key (source_key → target_key). No per-slice
+            chord-tone retuning; that destroys formants and sounds bad.
+          • LAYER STACKS ARE SEPARATE TRACKS — octave/fifth layers are
+            duplicate child tracks at reduced volume (not overlays that
+            smear the lead).
+          • BAR-LEVEL VARIATION — each bar pulls a different permutation
+            of source slices, so the arrangement doesn't just loop.
 
-        The AI does not orchestrate — this tool does. Users hear the
-        chopped-and-arranged vocal after ONE call.
+        REQUIREMENT for clean pitch: set REAPER's per-item pitch-shift mode
+        to "élastique Pro Soloist Monophonic" (Project Settings → Media
+        Item Defaults, or per-take in Item Properties). Raw pitch shift
+        without formant preservation destroys vocal character. The tool
+        does not auto-set this (requires REAPER user config).
+
+        Modes:
+          • `slice-preserve` (default): slice source at a 1/16 (or 1/8 /
+            1/32 per style) grid, reorder slices across bars for variation,
+            apply ONE uniform pitch shift to all chops.
+          • `melody`: pick a central vowel offset in the source, write a
+            chord-tone melody across bars (root/3rd/5th of each chord),
+            capped at ±5 semitones from source. Requires
+            `chord_progression`. Approximates the "one vowel + sampler +
+            MIDI melody" workflow (Flume / Simpler / Quick Sampler).
 
         Args:
             vocal_item_index: Global 0-based index of the vocal item.
-                              The source WAV behind it is the raw material.
-            chord_progression: Chords separated by commas / pipes / dashes,
-                               e.g. `"Fm, Ab, Bb, Fm"`.
-            bpm: Project tempo. Pass 0 to fetch it from REAPER.
-            bars: Length in bars to fill with the chopped arrangement.
-                  Default 4. Max 32.
-            style: One of `chillstep`, `future_bass`, `porter`, `trap`.
-                   Encodes rhythm density + layout + harmony rules.
-            target_track_name: Name for the new track. Default "Vocal Chops".
-            mute_original: Mute the source vocal's track so only the chops
-                           play. Default True.
-            source_key: The vocal's original musical key (note name). Used
-                        to compute pitch shifts — each chop's target is
-                        `chord_tone - source_key_offset`. Default "C".
-            seed: Random seed for slice order + harmony placements.
-                  0 = nondeterministic (new arrangement each call).
+            chord_progression: Chord list (required for `melody` mode,
+                               optional for `slice-preserve`). E.g.
+                               `"Fm, Ab, Bb, Fm"`.
+            bpm: Project tempo. 0 = fetch from REAPER.
+            bars: Length in bars. Default 4, max 32.
+            style: One of `future_bass`, `chillstep`, `porter`, `trap`,
+                   `mura_masa`, `odesza`. Drives grid / stutter / layers.
+            target_track_name: Name for the new track.
+            mute_original: Mute the source vocal's track. Default True.
+            source_key: Vocal's original musical key. Accepts `Am`,
+                        `A minor`, `A`, `Ebm`, etc. Default `C`.
+            target_key: Track key to transpose TO. Empty = use root of
+                        first chord in `chord_progression`, or source_key
+                        if no progression given.
+            mode: `slice-preserve` (default) or `melody`. See above.
+            seed: Random seed for bar permutations. 0 = nondeterministic.
         """
         # ────────── Validate inputs ──────────
         if vocal_item_index < 0:
@@ -640,46 +703,72 @@ def register(mcp: FastMCP):
                 ErrorCode.INVALID_PARAMETER,
                 f"style must be one of {list(_STYLE_CONFIGS.keys())}",
             )
+        if mode not in ("slice-preserve", "melody"):
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                "mode must be 'slice-preserve' or 'melody'",
+            )
         if not 1 <= bars <= 32:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "bars must be 1-32")
-        if source_key not in _NOTE_OFFSETS:
-            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"unknown source_key: {source_key}")
         if bpm < 0 or bpm > 400:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "bpm must be 0-400")
 
-        # Resolve BPM if not supplied
+        source_root = _parse_key(source_key)
+        if source_root is None:
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"unknown source_key: {source_key}")
+
+        # ────────── Resolve BPM ──────────
         if bpm == 0:
             ts = await client.execute("transport_get_state")
             tdata = ts.get("data", ts)
             bpm = float(tdata.get("bpm", 120.0))
         seconds_per_beat = 60.0 / bpm
-        seconds_per_16th = seconds_per_beat / 4.0
         bar_length_sec = seconds_per_beat * 4.0
 
-        # Parse chord progression
-        chord_names = _split_chord_list(chord_progression)
-        if not chord_names:
-            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "chord_progression is empty")
-        chords = []
-        failed_chords = []
+        # ────────── Parse chord progression ──────────
+        chord_names = _split_chord_list(chord_progression) if chord_progression else []
+        chords: list[tuple[int, list[int]]] = []
+        failed_chords: list[str] = []
         for name in chord_names:
             parsed = _parse_chord(name)
             if parsed is None:
                 failed_chords.append(name)
-                chords.append((0, [0, 4, 7]))
+                chords.append((source_root, [0, 4, 7]))
             else:
                 chords.append(parsed)
 
+        if mode == "melody" and not chords:
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                "mode='melody' requires chord_progression",
+            )
+
+        # ────────── Compute the UNIFORM pitch transpose ──────────
+        # Rule: source_key → target_key, capped ±6 semis (tritone).
+        # Everything after this uses this single value — no per-slot retune.
+        target_root = _parse_key(target_key) if target_key else None
+        if target_root is None and chords:
+            target_root = chords[0][0]
+        if target_root is None:
+            target_root = source_root  # no progression + no target_key → don't shift
+        uniform_shift = _shortest_shift(source_root, target_root)
+        pitch_warning = None
+        if abs(uniform_shift) >= 5:
+            pitch_warning = (
+                f"Uniform transpose is {uniform_shift} semitones — at the edge "
+                f"of formant-preserved territory. Consider changing source vocal "
+                f"or target key for a cleaner sound."
+            )
+
         cfg = _STYLE_CONFIGS[style]
-        pattern = cfg["pattern_per_bar"]
-        layout = cfg["layout"]
-        stack_chance = cfg["stack_harmony_chance"]
+        grid_per_bar = cfg["grid_per_bar"]
         stutter_slots = set(cfg["stutter_slots_per_bar"])
-        grid_per_bar = cfg["slice_grid_per_bar"]
+        bar_reorder = cfg["bar_reorder"]
+        layer_intervals = list(cfg["layer_intervals"])
+        layer_volumes_db = list(cfg["layer_volumes_db"])
+        seconds_per_slot = bar_length_sec / grid_per_bar
 
-        source_offset = _NOTE_OFFSETS[source_key]
-
-        # ────────── Read source info from the vocal item ──────────
+        # ────────── Read source info ──────────
         src_info_result = await client.execute(
             "item_get_source_info", item_index=vocal_item_index,
         )
@@ -692,154 +781,194 @@ def register(mcp: FastMCP):
                 f"Could not resolve source file for item {vocal_item_index}: {src_info_result}",
             )
 
-        # Number of source slices we can extract at 1/16 granularity.
-        # Capped so we never index beyond the source.
-        num_source_slices = max(1, int(source_length / seconds_per_16th))
+        # Inherit the source item's playrate so derived chops stay in-tempo
+        # when source BPM differs from project BPM. REAPER typically sets
+        # this automatically when dropping a BPM-tagged loop into a project
+        # of different tempo (e.g. 128 BPM vocal → 96 BPM project → 0.75).
+        playrate = float(src_data.get("take_playrate", 1.0) or 1.0)
+        if playrate <= 0:
+            playrate = 1.0
+        # Source-time per slot = project-time per slot * playrate.
+        seconds_per_slot_source = seconds_per_slot * playrate
+        num_source_slices = max(1, int(source_length / seconds_per_slot_source))
 
-        # ────────── Seed random for deterministic arrangements ──────────
         rng = random.Random(seed) if seed else random.Random()
 
-        # Build a shuffled source-slice order so each playback slot pulls
-        # a DIFFERENT segment of the source — this is what turns "sliced
-        # sequential vocal" into "chopped rearranged vocal".
-        source_slice_order = list(range(num_source_slices))
-        rng.shuffle(source_slice_order)
-        source_cursor = 0
-
-        def _next_source_slice_idx() -> int:
-            nonlocal source_cursor
-            idx = source_slice_order[source_cursor % len(source_slice_order)]
-            source_cursor += 1
-            return idx
-
-        # ────────── Create the target track ──────────
+        # ────────── Create target track + layer tracks ──────────
         tr_result = await client.execute("track_create", name=target_track_name)
         tr_data = tr_result.get("data", tr_result)
         target_track_idx = tr_data.get("index", tr_data.get("track_index"))
         if target_track_idx is None:
-            raise ReaperMCPError(
-                ErrorCode.COMMAND_FAILED,
-                f"Failed to create target track: {tr_result}",
-            )
+            raise ReaperMCPError(ErrorCode.COMMAND_FAILED, f"Failed to create target track: {tr_result}")
         target_track_idx = int(target_track_idx)
 
-        # ────────── Determine the original vocal's track for muting ──────────
+        layer_tracks: list[dict] = []  # [{interval, track_index, volume_db}]
+        for interval, vol_db in zip(layer_intervals, layer_volumes_db):
+            suffix = "+oct" if interval == 12 else ("+5th" if interval == 7 else f"+{interval}st")
+            layer_name = f"{target_track_name} {suffix}"
+            lt_res = await client.execute("track_create", name=layer_name)
+            lt_data = lt_res.get("data", lt_res)
+            lt_idx = lt_data.get("index", lt_data.get("track_index"))
+            if lt_idx is not None:
+                lt_idx = int(lt_idx)
+                try:
+                    await client.execute("track_set_volume", track_index=lt_idx, volume_db=float(vol_db))
+                except Exception:
+                    pass
+                layer_tracks.append({"interval": interval, "track_index": lt_idx, "volume_db": vol_db})
+
         vocal_track_idx = int(src_data.get("track_index", -1))
 
-        # ────────── Walk the pattern, place chops ──────────
+        # ────────── Decide pitches per slot ──────────
+        # slice-preserve: every slot = uniform_shift.
+        # melody: each slot pitch = uniform_shift + chord_tone_within_±5.
+        def _pitch_for_slot(bar_idx: int, slot_idx: int) -> int:
+            if mode == "slice-preserve" or not chords:
+                return uniform_shift
+            # melody: determine chord for this slot
+            total_slots = bars * grid_per_bar
+            slot_global = bar_idx * grid_per_bar + slot_idx
+            chord_idx = int((slot_global * len(chords)) / total_slots) if total_slots else 0
+            chord_idx = min(chord_idx, len(chords) - 1)
+            chord_root, chord_intervals = chords[chord_idx]
+            # Pick a chord tone cyclically: root → 3rd → 5th → root...
+            tone = chord_intervals[slot_idx % len(chord_intervals)]
+            # Target absolute pitch = chord_root + tone. Express as shift from source.
+            target_semi = (chord_root + tone) % 12
+            shift = _shortest_shift(source_root, target_semi)
+            # Cap at ±5 (formant-safe ceiling)
+            if shift > 5:
+                shift = 5
+            elif shift < -5:
+                shift = -5
+            return shift
+
+        # ────────── Source slice picking — per-bar permutation ──────────
+        def _bar_slice_order(bar_idx: int) -> list[int]:
+            base = list(range(num_source_slices))
+            if bar_reorder == "permuted":
+                # Seed per-bar so bars differ but overall arrangement is deterministic.
+                bar_rng = random.Random((seed or rng.random()) + bar_idx * 1000)
+                bar_rng.shuffle(base)
+            return base
+
+        # For melody mode, pin to a CENTRAL vowel offset for consistency
+        melody_source_offset_sec = 0.0
+        if mode == "melody":
+            # Pick the slice closest to 50% through the source (typically a
+            # sustained vowel). User can improve with transient analysis later.
+            melody_source_offset_sec = min(
+                max(0.0, (source_length * 0.5)),
+                max(0.0, source_length - seconds_per_slot_source),
+            )
+
+        # ────────── Walk bars/slots, place chops contiguously ──────────
         placements: list[dict] = []
-        harmony_layers: list[dict] = []
-        per_chord_tone_idx: dict[int, int] = {}
+        layer_placements: list[dict] = []
 
         for bar_idx in range(bars):
             bar_start_sec = bar_idx * bar_length_sec
-            for slot_idx, slot in enumerate(pattern):
-                if slot == 0:
-                    continue  # gap
-                slot_start_sec = bar_start_sec + slot_idx * seconds_per_16th
+            slice_order = _bar_slice_order(bar_idx)
+            slice_cursor = 0
 
-                # Which chord is this slot in?
-                # chord_duration_sec = bar_length_sec / (len(chords) / bars)
-                # Simpler: distribute chords evenly across bars
-                if len(chords) == bars:
-                    chord_idx = bar_idx
+            for slot_idx in range(grid_per_bar):
+                slot_start_sec = bar_start_sec + slot_idx * seconds_per_slot
+                slot_length = seconds_per_slot  # CONTIGUOUS — no gaps
+
+                # Source offset (in source time — accounts for playrate)
+                if mode == "melody":
+                    source_off_sec = melody_source_offset_sec
                 else:
-                    chord_idx = int((bar_idx * len(chords)) / bars) if bars > 0 else 0
-                chord_idx = chord_idx % len(chords)
-                chord_root, chord_intervals = chords[chord_idx]
+                    slice_idx = slice_order[slice_cursor % len(slice_order)]
+                    slice_cursor += 1
+                    source_off_sec = slice_idx * seconds_per_slot_source
+                    # Guard against end-of-source (leave one slot worth of source)
+                    max_off = max(0.0, source_length - seconds_per_slot_source)
+                    if source_off_sec > max_off:
+                        source_off_sec = max_off
 
-                # Pick a chord tone based on layout
-                chord_pos = per_chord_tone_idx.get(chord_idx, 0)
-                per_chord_tone_idx[chord_idx] = chord_pos + 1
-                n_intervals = len(chord_intervals)
-                if layout == "root":
-                    tone_offset = 0
-                elif layout == "follow":
-                    tone_offset = chord_intervals[chord_pos % n_intervals]
-                elif layout == "ascending":
-                    step = chord_pos % (n_intervals * 2)
-                    tone_offset = chord_intervals[step % n_intervals] + (12 if step >= n_intervals else 0)
-                elif layout == "porter":
-                    porter_pattern = [0, 7, 12, 7]
-                    tone_offset = porter_pattern[chord_pos % len(porter_pattern)]
-                else:
-                    tone_offset = 0
-
-                target_pitch = chord_root + tone_offset
-                pitch_shift = target_pitch - source_offset
-                while pitch_shift > 24:
-                    pitch_shift -= 12
-                while pitch_shift < -24:
-                    pitch_shift += 12
-
-                # Pick a source slice
-                source_slice = _next_source_slice_idx()
-                source_offset_sec = source_slice * seconds_per_16th
-
-                # Stutter slots: also queue duplicate slots at +1/32
+                pitch_semis = _pitch_for_slot(bar_idx, slot_idx)
                 stutter = slot_idx in stutter_slots
-                slot_length = seconds_per_16th * (0.5 if stutter else 0.95)
 
-                # Place the chop via the virtual-slice Lua handler
+                # Place main chop
                 try:
-                    place_result = await client.execute(
-                        "chops_create_virtual_slice",
-                        source_item_index=vocal_item_index,
-                        target_track_index=target_track_idx,
-                        target_position_sec=slot_start_sec,
-                        source_offset_sec=source_offset_sec,
-                        length_sec=slot_length,
-                        pitch_semis=float(pitch_shift),
-                        fade_len_sec=0.005,
-                    )
-                    pdata = place_result.get("data", place_result)
-                    new_idx = pdata.get("new_item_index")
-                    placements.append({
-                        "bar": bar_idx + 1,
-                        "slot": slot_idx,
-                        "position_sec": round(slot_start_sec, 4),
-                        "length_sec": round(slot_length, 4),
-                        "source_offset_sec": round(source_offset_sec, 4),
-                        "chord_idx": chord_idx,
-                        "chord_name": chord_names[chord_idx] if chord_idx < len(chord_names) else "?",
-                        "pitch_semis": pitch_shift,
-                        "item_index": new_idx,
-                    })
-
-                    # Stutter: place 1-2 extra rapid chops within this slot
                     if stutter:
-                        for j in range(1, 3):  # 2 more fast hits
-                            substart = slot_start_sec + (seconds_per_16th * 0.33 * j)
-                            await client.execute(
+                        # Replace slot with 3 rapid sub-chops filling the full slot time.
+                        sub_count = 3
+                        sub_len = slot_length / sub_count
+                        for j in range(sub_count):
+                            sub_start = slot_start_sec + j * sub_len
+                            res = await client.execute(
                                 "chops_create_virtual_slice",
                                 source_item_index=vocal_item_index,
                                 target_track_index=target_track_idx,
-                                target_position_sec=substart,
-                                source_offset_sec=source_offset_sec,
-                                length_sec=seconds_per_16th * 0.28,
-                                pitch_semis=float(pitch_shift),
+                                target_position_sec=sub_start,
+                                source_offset_sec=source_off_sec,
+                                length_sec=sub_len,
+                                pitch_semis=float(pitch_semis),
+                                playrate=playrate,
                                 fade_len_sec=0.003,
                             )
+                            pdata = res.get("data", res)
+                            placements.append({
+                                "bar": bar_idx + 1,
+                                "slot": slot_idx,
+                                "sub": j,
+                                "position_sec": round(sub_start, 4),
+                                "length_sec": round(sub_len, 4),
+                                "source_offset_sec": round(source_off_sec, 4),
+                                "pitch_semis": pitch_semis,
+                                "stutter": True,
+                                "item_index": pdata.get("new_item_index"),
+                            })
+                    else:
+                        res = await client.execute(
+                            "chops_create_virtual_slice",
+                            source_item_index=vocal_item_index,
+                            target_track_index=target_track_idx,
+                            target_position_sec=slot_start_sec,
+                            source_offset_sec=source_off_sec,
+                            length_sec=slot_length,
+                            pitch_semis=float(pitch_semis),
+                            playrate=playrate,
+                            fade_len_sec=0.005,
+                        )
+                        pdata = res.get("data", res)
+                        placements.append({
+                            "bar": bar_idx + 1,
+                            "slot": slot_idx,
+                            "position_sec": round(slot_start_sec, 4),
+                            "length_sec": round(slot_length, 4),
+                            "source_offset_sec": round(source_off_sec, 4),
+                            "pitch_semis": pitch_semis,
+                            "stutter": False,
+                            "item_index": pdata.get("new_item_index"),
+                        })
 
-                    # Harmony stack on this placement? (chance-based)
-                    if new_idx is not None and rng.random() < stack_chance:
-                        for interval in (7, 12):  # 5th + octave
-                            layer_pitch = pitch_shift + interval
+                    # Place layer copies on separate tracks (octave / fifth)
+                    for layer in layer_tracks:
+                        layer_pitch = pitch_semis + layer["interval"]
+                        try:
                             await client.execute(
                                 "chops_create_virtual_slice",
                                 source_item_index=vocal_item_index,
-                                target_track_index=target_track_idx,
+                                target_track_index=layer["track_index"],
                                 target_position_sec=slot_start_sec,
-                                source_offset_sec=source_offset_sec,
+                                source_offset_sec=source_off_sec,
                                 length_sec=slot_length,
                                 pitch_semis=float(layer_pitch),
+                                playrate=playrate,
                                 fade_len_sec=0.005,
                             )
-                            harmony_layers.append({
-                                "placement_bar": bar_idx + 1,
-                                "placement_slot": slot_idx,
-                                "layer_pitch_semis": layer_pitch,
+                            layer_placements.append({
+                                "bar": bar_idx + 1,
+                                "slot": slot_idx,
+                                "interval": layer["interval"],
+                                "pitch_semis": layer_pitch,
+                                "track_index": layer["track_index"],
                             })
+                        except Exception:
+                            pass  # layer failure is non-fatal
                 except Exception as e:
                     placements.append({
                         "bar": bar_idx + 1,
@@ -847,7 +976,7 @@ def register(mcp: FastMCP):
                         "error": str(e),
                     })
 
-        # ────────── Mute original vocal if requested ──────────
+        # ────────── Mute original vocal ──────────
         muted_track = False
         if mute_original and vocal_track_idx >= 0:
             try:
@@ -856,32 +985,42 @@ def register(mcp: FastMCP):
                 )
                 muted_track = True
             except Exception:
-                pass  # non-fatal
+                pass
+
+        main_chops = sum(1 for p in placements if "item_index" in p and p["item_index"] is not None)
 
         return {
             "style": style,
+            "mode": mode,
             "bpm": bpm,
             "bars": bars,
             "bar_length_sec": round(bar_length_sec, 4),
+            "grid_per_bar": grid_per_bar,
+            "seconds_per_slot": round(seconds_per_slot, 4),
             "chord_count": len(chords),
             "chord_progression": chord_names,
+            "source_key": source_key,
+            "target_key": target_key or (chord_names[0] if chord_names else source_key),
+            "uniform_shift_semis": uniform_shift,
+            "pitch_warning": pitch_warning,
+            "inherited_playrate": round(playrate, 4),
             "target_track_name": target_track_name,
             "target_track_index": target_track_idx,
+            "layer_tracks": layer_tracks,
             "source_vocal_track_index": vocal_track_idx,
             "source_vocal_muted": muted_track,
             "source_file": source_file,
             "source_length_sec": round(source_length, 4),
-            "source_key": source_key,
-            "layout": layout,
-            "placements_made": sum(1 for p in placements if "item_index" in p and p["item_index"] is not None),
-            "harmony_layers_made": len(harmony_layers),
+            "placements_made": main_chops,
+            "layer_placements_made": len(layer_placements),
             "failed_chords": failed_chords,
             "placements": placements,
             "hint": (
-                f"{style} chop arrangement built — "
-                f"{len([p for p in placements if 'item_index' in p])} chops + "
-                f"{len(harmony_layers)} harmony layers on track '{target_track_name}'. "
-                f"Hit play. If too dense/sparse, call again with a different style or seed."
+                f"{style}/{mode} chop built — {main_chops} contiguous chops "
+                f"on '{target_track_name}', +{len(layer_placements)} layer hits "
+                f"across {len(layer_tracks)} stack track(s). Uniform transpose "
+                f"{uniform_shift:+d} semitones. Set REAPER pitch mode to élastique "
+                f"Pro Soloist Monophonic for clean formant. Hit play."
             ),
         }
 
