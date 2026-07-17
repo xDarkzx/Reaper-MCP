@@ -110,6 +110,21 @@ progressive_house, dubstep, trap, drum_and_bass, trance
 
 **Electronic (4):** synthwave, lofi, ambient, hiphop
 
+**Jazz (3):** swing_jazz, jazz_fusion, latin_jazz — near-zero bus compression,
+wide dynamic range (target LUFS -13 to -16), no sidechain. Dynamics come from
+the performance, not processing.
+
+**Orchestral (3):** classical_chamber, cinematic_trailer, ambient_orchestral —
+pairs with the BBC Spitfire CC reference below. No/minimal bus compression,
+loudness targets -16 to -20 LUFS (closer to a classical/broadcast master than
+a streaming-loudness target — that's intentional, not a bug).
+
+**Funk/Soul (4):** classic_funk, motown_soul, neo_soul, disco_funk — fast
+transient-catching compression instead of loudness-flattening compression.
+Sidechain is used sparingly and never kick→bass (funk bass and kick play in
+unison; ducking one under the other fights the pocket). `neo_soul` uses a
+subtle vocal→keys/horns duck; `disco_funk` uses a light kick→strings duck.
+
 Each style has genre-appropriate: LUFS target, sidechain specs, reverb character,
 limiter style, and per-instrument EQ/comp curves.
 
@@ -145,5 +160,9 @@ For humanization, quantization, or scale-snapping: do it manually via `midi_set_
 | Pop | Vocal loudest, mild bass-kick sidechain (amount 0.5), clean HP on vocals at 100Hz |
 | Classical / orchestral | Strings from bar 1, CC1 the dynamics driver, no sidechain, natural dynamics |
 | Ambient | Dynamic range preserved, huge reverb sends, no limiting aggression (ambient style has bus_comp=None) |
+| Jazz | Write in real time-feel (swing eighths, not quantized grid), leave space for solos, brushes not sticks, no sidechain, upright bass not synth bass |
+| Cinematic / trailer | Tension via slow harmonic rhythm + rising strings, percussion hits land on structural downbeats, huge headroom for the impact moments, no pumping |
+| Funk | Pocket over precision — slight behind/ahead-the-beat feel per instrument, horn stabs on the "and", bass and kick lock together (never sidechain one under the other) |
+| Soul | Vocal-forward, warm low-mids (don't over-HP the vocal like pop), call-and-response backing vocals, gentle compression that rides the phrasing |
 
 Pick a target LUFS consistent with the style — engine_master handles this.

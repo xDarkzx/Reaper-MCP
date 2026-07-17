@@ -125,7 +125,7 @@ Open your AI client and start talking:
 | **Sends & Routing** | 7 | Create/remove sends, set volume/pan/mute, full routing diagram |
 | **FX** | 15 | Add/remove plugins, get/set parameters, presets, enable/disable, show UI, find instrument, move within chain, rename display label |
 | **FX Inventory** | 2 | `fx_list_installed` (detects FabFilter / Waves / iZotope / Valhalla / racks), `set_fx_preferences` |
-| **Mix & Master** | 3 | `engine_mix`, `engine_master`, `engine_fix_mix` — 25 style profiles across EDM / Rock / Pop / Electronic |
+| **Mix & Master** | 3 | `engine_mix`, `engine_master`, `engine_fix_mix` — 35 style profiles across EDM / Rock / Pop / Electronic / Jazz / Orchestral / Funk-Soul |
 | **Sidechain** | 1 | `setup_sidechain` — pin-mapped kick→bass/pad pumping with a single amount dial |
 | **Bus Pipelines** | 4 | `setup_parallel_compression`, `setup_drum_bus`, `setup_vocal_chain`, `bounce_stems` |
 | **Composition Utility** | 3 | `get_track_instruments`, `analyze_score`, `compose_arrangement` (small batch insert) |
@@ -174,12 +174,15 @@ The default 163-tool surface is designed for full-featured frontier models. Smal
 | `setup_drum_bus / setup_parallel_compression / setup_vocal_chain` | Ready-made bus recipes for drums, parallel (NY) comp, and pro vocal chains |
 | `bounce_stems(track_indices)` | Render selected tracks individually to WAV stems |
 
-**Styles (25):**
+**Styles (35):**
 
 - **EDM (11):** `melodic_dubstep`, `big_room`, `future_bass`, `future_house`, `deep_house`, `tech_house`, `progressive_house`, `dubstep`, `trap`, `drum_and_bass`, `trance`
 - **Rock (6):** `alt_rock`, `classic_rock`, `pop_rock`, `hard_rock`, `punk`, `post_rock`
 - **Pop (4):** `modern_pop`, `dance_pop`, `indie_pop`, `rnb_pop`
 - **Electronic (4):** `synthwave`, `lofi`, `ambient`, `hiphop`
+- **Jazz (3):** `swing_jazz`, `jazz_fusion`, `latin_jazz`
+- **Orchestral (3):** `classical_chamber`, `cinematic_trailer`, `ambient_orchestral`
+- **Funk/Soul (4):** `classic_funk`, `motown_soul`, `neo_soul`, `disco_funk`
 
 **Smart plugin detection.** `fx_list_installed()` inspects what's on the user's machine and reports the best-available EQ / compressor / reverb / limiter / de-esser / gate / saturator / multiband / stereo tool — covering FabFilter, Waves, iZotope, Valhalla, Softube, TDR, Slate, Melda, Soundtoys, Airwindows, REAPER stock, and common rack hosts (Waves StudioRack, Blue Cat PatchWork, Kilohearts Snap Heap). Users can pin category → plugin preferences via `set_fx_preferences(...)`.
 
@@ -236,7 +239,7 @@ Reaper-MCP/
 │   │   ├── fx_inventory.py         # Installed-plugin discovery
 │   │   ├── plugins.py              # Plugin param translation
 │   │   ├── profiles.py             # Legacy orchestral profiles
-│   │   ├── profiles_v2.py          # Schema for 25 style profiles
+│   │   ├── profiles_v2.py          # Schema for 35 style profiles
 │   │   └── catalog/                # Per-family style catalog
 │   │       ├── edm.py              # 11 EDM subgenres
 │   │       ├── rock.py             # 6 rock subgenres

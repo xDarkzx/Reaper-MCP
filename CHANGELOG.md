@@ -6,6 +6,43 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **10 new mix-engine styles across 3 new genre families — Jazz, Orchestral,
+  Funk/Soul (25 → 35 styles).** ⚠️ **Not yet tested in a live REAPER
+  session** — written and statically verified (profiles register, EQ/comp
+  serialize, sidechain specs reference real roles) but not run end-to-end
+  against real audio. Test before relying on it.
+  - **Jazz** (`swing_jazz`, `jazz_fusion`, `latin_jazz`): near-zero bus
+    compression, wide dynamic range (-13 to -16 LUFS), no sidechain —
+    dynamics are the performance, not something to flatten. New shared
+    presets: `upright_bass`, `piano_jazz`, `ride_cymbal`, `vocal_jazz`,
+    `comp_jazz_gentle`.
+  - **Orchestral** (`classical_chamber`, `cinematic_trailer`,
+    `ambient_orchestral`): pairs with the existing BBC Spitfire CC guidance
+    in `00_core.md`. Minimal-to-zero bus compression, -16 to -20 LUFS
+    targets (closer to a classical/broadcast master than streaming
+    loudness — intentional). These are **consolidated-section** profiles
+    (one "strings"/"brass"/"woodwinds"/"choir" track each) — for a full
+    per-instrument multi-mic template (separate Violin 1/2, Viola, Cello,
+    individual winds/brass), the pre-existing legacy orchestral path in
+    `mix_engine/profiles.py` is still the finer-grained option and is what
+    any style name outside the v2 catalog routes to (empty string
+    included) — this was already true before this change and still is.
+    New shared presets: `strings_section`, `brass_orchestral`, `woodwinds`,
+    `choir`, `timpani_perc`, `comp_orchestral_glue`.
+  - **Funk/Soul** (`classic_funk`, `motown_soul`, `neo_soul`,
+    `disco_funk`): fast transient-catching compression instead of
+    loudness-flattening compression. No kick↔bass sidechain in any of
+    them — funk bass and kick play in rhythmic unison, so ducking one
+    under the other fights the pocket instead of serving it. `neo_soul`
+    uses a genuinely-pro technique instead — a subtle vocal→keys/horns
+    duck (amount 0.2-0.25, slow release) so the vocal breathes room without
+    riding a faded through every phrase; `disco_funk` uses a light
+    kick→strings duck, since disco sits closer to dance music than the
+    other three. New shared presets: `slap_bass`, `electric_piano`,
+    `horns_section`, `vocal_soul`, `comp_funk_punch`, `comp_soul_vocal`,
+    `comp_horns`.
+  - `engine_mix`/`engine_master`'s docstrings and `00_core.md`'s style
+    cheat sheet updated with per-family mixing tips for all three.
 - **`chop_pipeline` — end-to-end vocal-chop arrangement (Phase 3)**. One tool call produces a real chopped vocal on a NEW track — not sliced-in-place, not pitched-in-place. Creates a "Vocal Chops" track, reads the source WAV behind a vocal item, generates 1/16-note candidate slices, applies a style-specific rhythmic pattern (which slots get chops vs. gaps), pulls slices from a SHUFFLED source-offset order so the arrangement is truly reordered (not sequential playback), pitches each placement to a chord tone, optionally stutters and harmony-stacks, adds 5 ms fades on every chop edge to prevent clicks, and mutes the original vocal. Styles encode chop-production craft so the AI doesn't have to re-derive it per call: `chillstep` (sparse 6/16), `future_bass` (dense 11/16 + 40% harmony stacks), `porter` (syncopated 9/16 with stutter clusters), `trap` (percussive 7/16). Two new Lua handlers back it: `item_get_source_info` (resolves the source file path + offset behind an item) and `chops_create_virtual_slice` (creates an item on a target track that references a specific time range of a source WAV — no audio bouncing required).
 - **Vocal-chop Phase 2 helpers** (3 more tools on top of Phase 1 primitives):
   - `analyze_chop_set(item_indices)` — calls `item_get_info` per chop, classifies duration as `hit` / `staccato` / `syllable` / `sustain` so the AI can pick chops appropriate to each musical role without doing audio content analysis.

@@ -8,3 +8,6 @@ from reaper_mcp.mix_engine.catalog import edm  # noqa: F401
 from reaper_mcp.mix_engine.catalog import rock  # noqa: F401
 from reaper_mcp.mix_engine.catalog import pop  # noqa: F401
 from reaper_mcp.mix_engine.catalog import electronic  # noqa: F401
+from reaper_mcp.mix_engine.catalog import jazz  # noqa: F401
+from reaper_mcp.mix_engine.catalog import orchestral  # noqa: F401
+from reaper_mcp.mix_engine.catalog import funk_soul  # noqa: F401

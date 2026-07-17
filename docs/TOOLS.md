@@ -317,12 +317,15 @@ Full mix and master pipelines driven by a named style profile. Source: `mix_tool
 | `engine_master(style, clean=True)` | Master-bus mastering chain: HP 25 Hz → bus glue comp → tonal shelf EQ → stereo width → brick-wall limiter, with style-appropriate LUFS and true-peak targets. |
 | `engine_fix_mix(style="", include_master=True)` | Non-destructive mix repair — re-runs the pipeline on an existing session, preserving user tweaks where possible. |
 
-**Supported styles (25):**
+**Supported styles (35):**
 
 - **EDM (11):** `melodic_dubstep`, `big_room`, `future_bass`, `future_house`, `deep_house`, `tech_house`, `progressive_house`, `dubstep`, `trap`, `drum_and_bass`, `trance`
 - **Rock (6):** `alt_rock`, `classic_rock`, `pop_rock`, `hard_rock`, `punk`, `post_rock`
 - **Pop (4):** `modern_pop`, `dance_pop`, `indie_pop`, `rnb_pop`
 - **Electronic (4):** `synthwave`, `lofi`, `ambient`, `hiphop`
+- **Jazz (3):** `swing_jazz`, `jazz_fusion`, `latin_jazz` — near-zero bus compression, wide dynamic range, no sidechain.
+- **Orchestral (3):** `classical_chamber`, `cinematic_trailer`, `ambient_orchestral` — pairs with the BBC Spitfire CC reference; minimal/no bus compression, -16 to -20 LUFS targets.
+- **Funk/Soul (4):** `classic_funk`, `motown_soul`, `neo_soul`, `disco_funk` — fast transient-catching compression, no kick↔bass sidechain (they play in unison). `neo_soul` ducks keys/horns under vocal; `disco_funk` ducks strings under kick.
 
 ## Sidechain
 
@@ -531,6 +534,6 @@ engine_fix_mix(...)                            # correct if off-target
 
 - **Shorthand** — most composition tools accept either a JSON array or ReaperMCP's compact shorthand notation. See `reaper_mcp/instructions/00_core.md` for the full grammar.
 - **Qn / QN** — quarter notes (REAPER's preferred MIDI time unit).
-- **Style** — one of the 25 style profile names listed under [Mix & Master](#mix--master).
+- **Style** — one of the 35 style profile names listed under [Mix & Master](#mix--master).
 
 For an end-to-end walk-through, see **[PROJECT_SETUP.md](PROJECT_SETUP.md)**. For architecture details, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.

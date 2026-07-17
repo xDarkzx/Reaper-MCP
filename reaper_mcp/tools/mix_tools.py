@@ -52,7 +52,10 @@ def register(mcp: FastMCP):
         Supported styles: melodic_dubstep, big_room, future_bass, future_house, deep_house,
         tech_house, progressive_house, dubstep, trap, drum_and_bass, trance, modern_pop,
         dance_pop, indie_pop, rnb_pop, alt_rock, classic_rock, pop_rock, hard_rock, punk,
-        post_rock, synthwave, lofi, ambient, hiphop. Plus orchestral genres (passed through).
+        post_rock, synthwave, lofi, ambient, hiphop, swing_jazz, jazz_fusion, latin_jazz,
+        classical_chamber, cinematic_trailer, ambient_orchestral, classic_funk, motown_soul,
+        neo_soul, disco_funk (35 total). Any other name falls through to the legacy
+        per-instrument orchestral master chain.
 
         Args:
             style: Style name from the catalog (required).
@@ -69,20 +72,29 @@ def register(mcp: FastMCP):
         """One-click professional mix pipeline. Applies volume staging, pan, EQ, compression, reverb buses, and sidechain.
 
         Two paths depending on the style:
-          - **v2 catalog** (EDM / Rock / Pop / Electronic — 25 styles): resolves live
-            track NAMES to instrument roles via alias matching (e.g. a track named
-            "Kick" → role "kick"). Applies per-role EQ/comp/sends and profile-defined
-            sidechain relationships. Rename your tracks to include role keywords
-            like "kick", "snare", "sub", "pad", "lead", "vocal".
-          - **Legacy orchestral**: used for orchestral styles. Matches track VSTi
-            names against the BBC / Spitfire instrument map.
+          - **v2 catalog** (EDM / Rock / Pop / Electronic / Jazz / Orchestral /
+            Funk-Soul — 35 styles): resolves live track NAMES to instrument
+            roles via alias matching (e.g. a track named "Kick" → role "kick").
+            Applies per-role EQ/comp/sends and profile-defined sidechain
+            relationships. Rename your tracks to include role keywords like
+            "kick", "snare", "sub", "pad", "lead", "vocal" — or for the
+            orchestral v2 styles, consolidated section names like "strings",
+            "brass", "woodwinds", "choir".
+          - **Legacy orchestral**: for a full per-instrument multi-mic template
+            (separate Violin 1 / Violin 2 / Viola / Cello / individual winds &
+            brass tracks) — matches track VSTi names against the BBC/Spitfire
+            instrument map with per-instrument-tuned EQ/comp, not just one
+            curve per section. Finer-grained than the v2 orchestral styles.
+            Triggered by any style name NOT in the v2 catalog (empty string
+            works).
 
         Auto-detects FabFilter (Pro-Q 3, Pro-C 2, Pro-R) or falls back to REAPER
         stock (ReaEQ, ReaComp, ReaVerbate).
 
         Args:
             style: Style name. For v2: melodic_dubstep, big_room, future_bass, modern_pop,
-                   alt_rock, etc. (25 total). Empty/orchestral → legacy path.
+                   alt_rock, swing_jazz, classical_chamber, classic_funk, etc. (35 total).
+                   Empty, or any name not in the v2 catalog, → legacy per-instrument path.
             clean: Remove existing mix FX before applying (default True).
         """
         import reaper_mcp.mix_engine.catalog  # noqa: F401 — register catalog

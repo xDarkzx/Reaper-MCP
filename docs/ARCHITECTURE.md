@@ -128,12 +128,25 @@ catalog/
 ├── edm.py           # 11 EDM subgenres
 ├── rock.py          # 6 rock subgenres
 ├── pop.py           # 4 pop subgenres
-└── electronic.py    # synthwave, lofi, ambient, hiphop
+├── electronic.py    # synthwave, lofi, ambient, hiphop
+├── jazz.py          # swing_jazz, jazz_fusion, latin_jazz
+├── orchestral.py    # classical_chamber, cinematic_trailer, ambient_orchestral
+└── funk_soul.py     # classic_funk, motown_soul, neo_soul, disco_funk
 ```
 
 Each family registers its profiles into a central registry at import time. Adding a new style is: drop a profile dict into the relevant family file, name the track roles it expects, pick the reverb buses it wants — no pipeline changes.
 
 When a style **isn't** in the v2 catalog, the engine falls back to the legacy orchestral path in `profiles.py`, which matches against VSTi names (Spitfire Violin 1, BBC Brass, …) instead of track names.
+
+**Two orchestral paths, deliberately** — `catalog/orchestral.py`'s v2 styles
+(`classical_chamber`/`cinematic_trailer`/`ambient_orchestral`) use consolidated
+section roles (`strings_section`, `brass_orchestral`, `woodwinds`, `choir`) for
+projects with one track per section. `profiles.py`'s legacy path has
+per-instrument tuning (separate `violin_1`/`violin_2`/`viola`/`cello`, each
+individual woodwind/brass) for a full multi-mic orchestral template — that's
+the finer-grained option and is what you get from any style name not in the
+v2 catalog (empty string included). Don't consolidate `profiles.py` into the
+v2 catalog format — the per-instrument granularity is the point.
 
 ### Role resolution
 
