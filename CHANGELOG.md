@@ -35,6 +35,61 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Fixed
 
+- **`item_get_all` and `fx_list_installed` had no output cap.** A chop-heavy
+  project can have hundreds of items; a power user's plugin folder can have
+  500+ entries. `fx_list_installed` is documented as a call the AI should
+  make before every mix pass, so its `all_installed` dump compounded on
+  every mixing session. Both now cap by default (`item_get_all` via a new
+  `max_results` param, 200 default/2000 ceiling, matching the existing
+  `midi_get_notes` convention; `fx_list_installed`'s `all_installed` caps at
+  150 with a `full_list=True` opt-out) instead of dumping unbounded lists
+  into the calling model's context on every call.
+- **Unused `mido` dependency removed** from `pyproject.toml` — nothing in
+  the codebase imports it; all MIDI work goes through the REAPER-side Lua
+  bridge, not a Python MIDI library.
+- **`analysis_tools`'s missing-dependency fallback was invisible at the
+  registry level.** The module already degrades gracefully when `numpy`/
+  `soundfile`/`pyloudnorm` aren't installed (skips registering its 4 tools
+  instead of crashing), but `register()` still returns normally, so
+  `tool_registry.py` counted it as a normal success with no signal that 4
+  tools quietly vanished. Added a `degraded` check that surfaces this in the
+  startup banner.
+- **Composition/mix tool modules were silently excluded from every published
+  copy of the repo.** The `.gitignore` rule added in the 0.3.0 release
+  (`compose_*.py` / `mix_*.py`, meant for scratchwork) was broad enough to
+  also catch the real, shipped `compose_tools.py`, `compose_edit_tools.py`,
+  `mix_tools.py`, and `compose_helpers.py` — 15 tools including
+  `wipe_all_midi`, `compose_arrangement`, `get_track_instruments`,
+  `analyze_score`, `edit_section`, `engine_mix`, `engine_master`. The files
+  existed on disk in the working tree (so local testing never caught it) but
+  had never once been committed, so every clone of the repo shipped with
+  `00_core.md`'s CRITICAL-rule tools missing entirely — `tool not found` for
+  clients, while the forbidden fallbacks (`item_delete`,
+  `midi_delete_all_notes`) were the only things that actually worked.
+  Narrowed the `.gitignore` rule and committed the four files. Tool surface
+  unchanged (163 across 25 modules) — these tools already counted, they just
+  weren't shipping.
+- **`wipe_all_midi` deleted audio items.** The Lua handler deleted every
+  media item on the targeted tracks with no `TakeIsMIDI` check, so calling it
+  on a track holding recorded audio silently destroyed it. Now skips items
+  whose active take isn't MIDI; audio items are left in place.
+- **`tool_registry.py` couldn't detect a missing module under the default
+  `full` profile.** The existing "profile references a module that isn't on
+  disk" sanity check only ran for restricted profiles (`composition`/
+  `mixing`/`analysis`/`minimal`) — `full` has `allowed=None` (register
+  whatever `pkgutil` finds on disk), so it had nothing to compare against and
+  would have stayed silent through the exact bug above. Added
+  `_EXPECTED_MODULES`, an explicit list of every module that should exist,
+  checked against the registered set for every profile including `full`. A
+  future `.gitignore`-style regression now prints a loud startup warning
+  instead of shipping quietly incomplete.
+- **`_safe_path` system-directory blocklist was Windows-only.** `item_tools.py`
+  and `project_tools.py` guarded against reading/writing REAPER paths under
+  `C:\Windows` / `Program Files`, but only when `sys.platform == "win32"` —
+  on macOS/Linux there was no equivalent check at all, so `/etc`, `/usr`,
+  `/bin`, `/boot`, `/proc`, `/sys`, `/dev`, `/System`, `/Library` were
+  unguarded. Added a matching `_BLOCKED_DIRS_NIX` list with a boundary-safe
+  prefix check.
 - **Mix cleanup no longer nukes user-added FX.** The mix engine now tags
   every FX it adds via `setup_fx_chain` / `setup_master_chain` with a
   `[MIX] ` prefix. Cleanup matches the prefix first; it only falls back to

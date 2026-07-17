@@ -12,6 +12,14 @@ _BLOCKED_DIRS_WIN = [
     os.environ.get("SYSTEMDRIVE", "C:") + os.sep + "Program Files",
     os.environ.get("SYSTEMDRIVE", "C:") + os.sep + "Program Files (x86)",
 ]
+_BLOCKED_DIRS_NIX = [
+    "/etc", "/bin", "/sbin", "/usr", "/boot", "/proc", "/sys", "/dev",
+    "/System", "/Library",
+]
+
+
+def _is_blocked(resolved: str, blocked: str) -> bool:
+    return resolved == blocked or resolved.startswith(blocked + os.sep)
 
 
 def _safe_path(path: str) -> str:
@@ -24,11 +32,15 @@ def _safe_path(path: str) -> str:
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "Path traversal not allowed")
     if not os.path.isabs(resolved):
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "Path must be absolute")
-    # Block system directories on Windows
+    # Block system directories
     if sys.platform == "win32":
         resolved_lower = resolved.lower()
         for blocked in _BLOCKED_DIRS_WIN:
             if resolved_lower.startswith(blocked.lower()):
+                raise ReaperMCPError(ErrorCode.INVALID_PATH, f"Access to system directory not allowed: {blocked}")
+    else:
+        for blocked in _BLOCKED_DIRS_NIX:
+            if _is_blocked(resolved, blocked):
                 raise ReaperMCPError(ErrorCode.INVALID_PATH, f"Access to system directory not allowed: {blocked}")
     return resolved
 

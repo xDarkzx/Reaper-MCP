@@ -13,11 +13,15 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
-    async def fx_list_installed(category: str = "") -> dict:
+    async def fx_list_installed(category: str = "", full_list: bool = False) -> dict:
         """List every FX plugin installed in REAPER, grouped by category.
 
         Uses REAPER's EnumInstalledFX API. Returns:
-          - `all_installed`: raw list of plugin names
+          - `all_installed`: raw list of plugin names — capped at 150 unless
+            `full_list=True` (power users can have 500+ installed; the
+            `best_*` picks below already cover the decision the AI actually
+            needs to make, so the raw list is capped by default to avoid
+            dumping the whole catalog into context on every call)
           - `best_eq` / `best_compressor` / `best_reverb` / `best_limiter` /
             `best_deesser` / `best_gate` / `best_saturator` / `best_multiband` /
             `best_stereo`: highest-ranked plugin per category that the user has
@@ -35,6 +39,9 @@ def register(mcp: FastMCP):
                       "eq", "compressor", "limiter", "reverb", "deesser",
                       "gate", "saturator", "multiband", "stereo".
                       Empty returns full inventory.
+            full_list: Return the complete `all_installed` list uncapped.
+                       Only needed if you're hunting for something the
+                       built-in category rankings don't cover.
         """
         from reaper_mcp.mix_engine.detect import get_inventory
         from reaper_mcp.mix_engine.fx_inventory import CATEGORY_RANKINGS, best_for_category
@@ -66,7 +73,13 @@ def register(mcp: FastMCP):
                 "user_override": inv.user_overrides.get(cat),
             }
 
-        return inv.to_dict()
+        result = inv.to_dict()
+        total = len(result.get("all_installed", []))
+        if not full_list and total > 150:
+            result["all_installed"] = result["all_installed"][:150]
+            result["all_installed_truncated"] = True
+            result["all_installed_total"] = total
+        return result
 
     @mcp.tool()
     async def set_fx_preferences(preferences: str) -> dict:

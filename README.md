@@ -140,13 +140,13 @@ Open your AI client and start talking:
 
 ### Tool profiles
 
-The default 147-tool surface is designed for full-featured frontier models. Smaller/cheaper models (Groq Llama 3 caps at 128 tools, some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's server config to pick a workflow-specific subset:
+The default 163-tool surface is designed for full-featured frontier models. Smaller/cheaper models (Groq Llama 3 caps at 128 tools, some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's server config to pick a workflow-specific subset:
 
 | Profile | Tools | For |
 |---------|------:|-----|
-| `full` *(default)* | ~153 | Frontier models — Claude, GPT-4, Gemini |
-| `composition` | ~109 | Writing / editing music (includes patterns + loops) |
-| `mixing` | ~67 | Mixing, mastering, bus pipelines |
+| `full` *(default)* | ~163 | Frontier models — Claude, GPT-4, Gemini |
+| `composition` | ~123 | Writing / editing music (includes patterns + loops) |
+| `mixing` | ~68 | Mixing, mastering, bus pipelines |
 | `analysis` | ~47 | Inspect + measure only |
 | `minimal` | ~40 | Smoke test / basic control |
 
@@ -243,7 +243,7 @@ Reaper-MCP/
 │   │       ├── pop.py              # 4 pop subgenres
 │   │       ├── electronic.py       # synthwave, lofi, ambient, hiphop
 │   │       └── _shared.py          # Shared role → EQ/comp library
-│   └── tools/                      # 24 modules, 153 auto-registered tools
+│   └── tools/                      # 25 modules, 163 auto-registered tools
 │       ├── transport_tools.py      # Playback and recording (11)
 │       ├── track_tools.py          # Track management + freeze (18)
 │       ├── template_tools.py       # Track templates (4)

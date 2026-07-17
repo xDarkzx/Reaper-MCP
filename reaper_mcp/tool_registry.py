@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Approximate per-profile tool counts — for the startup banner. Real count
 # is the sum of @mcp.tool() registrations in each module's register().
 PROFILES: dict[str, set[str] | None] = {
-    # `full` — everything. Default. ~147 tools across 22 modules.
+    # `full` — everything. Default. ~163 tools across 25 modules.
     "full": None,
     # `composition` — write / edit music. Drops FX, mix, sidechain, analysis.
     "composition": {
@@ -40,6 +40,21 @@ PROFILES: dict[str, set[str] | None] = {
         "transport_tools", "track_tools", "project_tools",
     },
 }
+
+# Every module name that should exist on disk in a healthy checkout — update
+# this when adding a new reaper_mcp/tools/*.py module. This is what lets the
+# `full` profile fail loud if a module goes missing (e.g. an overly-broad
+# .gitignore rule silently dropping shipped files) instead of the server
+# quietly booting with fewer tools than intended. `pkgutil.iter_modules`
+# can't warn about a file that isn't there — only an independent list can.
+_EXPECTED_MODULES = frozenset({
+    "analysis_tools", "chops_tools", "compose_edit_tools", "compose_tools",
+    "demo_tools", "envelope_tools", "fx_tools", "inventory_tools",
+    "item_tools", "loops_tools", "marker_tools", "midi_tools", "mix_tools",
+    "patterns_tools", "pipeline_tools", "project_tools", "quantize_tools",
+    "selection_tools", "send_tools", "sidechain_tools", "take_tools",
+    "template_tools", "tempo_tools", "track_tools", "transport_tools",
+})
 
 
 def _resolve_profile() -> tuple[str, set[str] | None]:
@@ -75,6 +90,7 @@ def register_all_tools(mcp: FastMCP):
     failures: list[tuple[str, Exception]] = []
     registered: list[str] = []
     skipped_by_profile: list[str] = []
+    degraded: list[tuple[str, str]] = []
 
     for finder, name, ispkg in pkgutil.iter_modules(tools_package.__path__):
         if allowed is not None and name not in allowed:
@@ -97,6 +113,12 @@ def register_all_tools(mcp: FastMCP):
             module.register(mcp)
             logger.info("Registered tools from %s", name)
             registered.append(name)
+            # Convention some modules use (see analysis_tools.py) to register()
+            # successfully but skip every tool because an optional dependency
+            # is missing. That's invisible to `registered`/`failures` above —
+            # surface it separately so it isn't silently swallowed.
+            if getattr(module, "_AVAILABLE", True) is False:
+                degraded.append((name, getattr(module, "_IMPORT_ERROR", "")))
         except Exception as e:
             logger.error("REGISTER FAILED for %s: %s", name, e, exc_info=True)
             sys.stderr.write(f"\n[reaper-mcp] ❌ Tool registration failed for '{name}': {e}\n")
@@ -107,24 +129,33 @@ def register_all_tools(mcp: FastMCP):
         banner += f", skipped {len(skipped_by_profile)} (not in profile)"
     sys.stderr.write(banner + "\n")
 
-    # Profile sanity check — if a profile references a module that doesn't
-    # exist on disk, warn so stale profile definitions get caught.
-    if allowed is not None:
-        missing = sorted(allowed - set(registered) - {n for n, _ in failures})
-        # Modules without register() land here too — filter those out.
-        truly_missing = []
-        for name in missing:
-            try:
-                importlib.import_module(f"reaper_mcp.tools.{name}")
-            except ModuleNotFoundError:
-                truly_missing.append(name)
-            except Exception:
-                pass  # some other problem — already surfaced via failures
-        if truly_missing:
-            sys.stderr.write(
-                f"[reaper-mcp] ⚠️  Profile '{profile_name}' references missing "
-                f"module(s): {truly_missing}. Profile definition is out of sync.\n"
-            )
+    if degraded:
+        sys.stderr.write(
+            f"[reaper-mcp] ⚠️  {len(degraded)} module(s) loaded but registered zero "
+            f"tools due to a missing optional dependency: "
+            f"{[n for n, _ in degraded]}. Details: {degraded}\n"
+        )
+
+    # Sanity check — compare what's actually on disk/registered against the
+    # known-good module set. Runs for every profile, including the default
+    # `full` (allowed=None), which otherwise has nothing to compare against.
+    expected = (allowed & _EXPECTED_MODULES) if allowed is not None else _EXPECTED_MODULES
+    missing = sorted(expected - set(registered) - {n for n, _ in failures})
+    # Modules without register() land here too — filter those out.
+    truly_missing = []
+    for name in missing:
+        try:
+            importlib.import_module(f"reaper_mcp.tools.{name}")
+        except ModuleNotFoundError:
+            truly_missing.append(name)
+        except Exception:
+            pass  # some other problem — already surfaced via failures
+    if truly_missing:
+        sys.stderr.write(
+            f"[reaper-mcp] ⚠️  Profile '{profile_name}' is missing expected "
+            f"module(s) that don't exist on disk: {truly_missing}. This "
+            f"install is incomplete — those tools will not be available.\n"
+        )
 
     if failures:
         sys.stderr.write(

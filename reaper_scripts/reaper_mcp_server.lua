@@ -2277,7 +2277,8 @@ end
 local compose = {}
 
 function compose.wipe_all_midi(p)
-  -- Deletes ALL MIDI items from ALL tracks (or specified tracks) in one call.
+  -- Deletes MIDI items from ALL tracks (or specified tracks) in one call.
+  -- Audio items (and items with no active take) are left untouched.
   -- p.tracks: optional JSON array of track indices e.g. [0,1,2]. If omitted, wipes ALL tracks.
   reaper.Undo_BeginBlock()
   local track_count = reaper.CountTracks(0)
@@ -2301,14 +2302,21 @@ function compose.wipe_all_midi(p)
       if tr then
         local item_count = reaper.CountTrackMediaItems(tr)
         if item_count > 0 then
+          local deleted_on_track = 0
           for j = item_count - 1, 0, -1 do
             local item = reaper.GetTrackMediaItem(tr, j)
             if item then
-              reaper.DeleteTrackMediaItem(tr, item)
-              total_deleted = total_deleted + 1
+              local take = reaper.GetActiveTake(item)
+              if take and reaper.TakeIsMIDI(take) then
+                reaper.DeleteTrackMediaItem(tr, item)
+                total_deleted = total_deleted + 1
+                deleted_on_track = deleted_on_track + 1
+              end
             end
           end
-          tracks_wiped = tracks_wiped + 1
+          if deleted_on_track > 0 then
+            tracks_wiped = tracks_wiped + 1
+          end
         end
       end
     end

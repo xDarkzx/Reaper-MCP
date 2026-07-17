@@ -153,7 +153,7 @@ Media item CRUD, split, fades, move, drop MIDI or audio files. Source: `item_too
 
 | Tool | Description |
 |------|-------------|
-| `item_get_all(track_index=-1)` | List every media item (optionally filtered by track). |
+| `item_get_all(track_index=-1, max_results=200)` | List every media item (optionally filtered by track). Capped at `max_results` (ceiling 2000) to avoid dumping a chop-heavy project's full item list into context; response includes `truncated`/`returned` when capped. |
 | `item_get_info(item_index)` | Position, length, fade, volume, mute state of an item. |
 | `item_select(item_index, selected=True, exclusive=False)` | Select one item. |
 | `item_split(item_index, position)` | Split an item at a time in seconds. |
@@ -304,7 +304,7 @@ Discover what plugins the user has installed, and pin per-category favourites. S
 
 | Tool | Description |
 |------|-------------|
-| `fx_list_installed(category="")` | Return every installed plugin plus the best-available EQ / compressor / reverb / limiter / de-esser / gate / saturator / multiband / stereo tool, racks detected (Waves StudioRack, Blue Cat PatchWork, Kilohearts Snap Heap, …), and any user overrides. |
+| `fx_list_installed(category="", full_list=False)` | Return every installed plugin plus the best-available EQ / compressor / reverb / limiter / de-esser / gate / saturator / multiband / stereo tool, racks detected (Waves StudioRack, Blue Cat PatchWork, Kilohearts Snap Heap, …), and any user overrides. `all_installed` caps at 150 entries unless `full_list=True`. |
 | `set_fx_preferences(preferences)` | Pin a category → plugin mapping. Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` (or `~/.config/reaper_mcp/` on *nix). |
 
 ## Mix & Master
@@ -359,7 +359,7 @@ Heavier-duty editing — project-scale wipes, section replacements, batch setup.
 
 | Tool | Description |
 |------|-------------|
-| `wipe_all_midi(tracks="")` | **The only correct way to clear MIDI.** Deletes every MIDI item, clears markers/regions, resets composition state. Pass `tracks="[0,1,2]"` for a partial wipe. |
+| `wipe_all_midi(tracks="")` | **The only correct way to clear MIDI.** Deletes MIDI items only (audio items are left untouched), clears markers/regions on a full wipe, resets composition state. Pass `tracks="[0,1,2]"` for a partial wipe. |
 | `reset_composition()` | Full project reset — wipe MIDI, delete all tracks, return to a blank slate. |
 | `configure_tracks(tracks)` | Batch-create or rename tracks with VSTi, colour, volume, pan. |
 | `setup_routing(sends)` | Batch-create track sends from a JSON description. |

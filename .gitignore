@@ -31,10 +31,6 @@ htmlcov/
 .claude/
 .mcp.json
 
-# Composition scratchwork
-compose_*.py
-mix_*.py
-
 # Secrets — never commit API keys
 Groq_API.md
 *.api_key

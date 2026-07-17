@@ -11,6 +11,14 @@ _BLOCKED_DIRS_WIN = [
     os.environ.get("SYSTEMDRIVE", "C:") + os.sep + "Program Files",
     os.environ.get("SYSTEMDRIVE", "C:") + os.sep + "Program Files (x86)",
 ]
+_BLOCKED_DIRS_NIX = [
+    "/etc", "/bin", "/sbin", "/usr", "/boot", "/proc", "/sys", "/dev",
+    "/System", "/Library",
+]
+
+
+def _is_blocked(resolved: str, blocked: str) -> bool:
+    return resolved == blocked or resolved.startswith(blocked + os.sep)
 
 
 def _safe_path(path: str) -> str:
@@ -23,11 +31,15 @@ def _safe_path(path: str) -> str:
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "Path traversal not allowed")
     if not os.path.isabs(resolved):
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "Path must be absolute")
-    # Block system directories on Windows
+    # Block system directories
     if sys.platform == "win32":
         resolved_lower = resolved.lower()
         for blocked in _BLOCKED_DIRS_WIN:
             if resolved_lower.startswith(blocked.lower()):
+                raise ReaperMCPError(ErrorCode.INVALID_PATH, f"Access to system directory not allowed: {blocked}")
+    else:
+        for blocked in _BLOCKED_DIRS_NIX:
+            if _is_blocked(resolved, blocked):
                 raise ReaperMCPError(ErrorCode.INVALID_PATH, f"Access to system directory not allowed: {blocked}")
     return resolved
 
@@ -36,13 +48,28 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
-    async def item_get_all(track_index: int = -1) -> dict:
+    async def item_get_all(track_index: int = -1, max_results: int = 200) -> dict:
         """Get all media items. Filter by track or -1 for all.
 
         Args:
             track_index: Track filter (-1=all).
+            max_results: Max items to return (default 200, hard ceiling 2000).
+                         A chop-heavy project can have hundreds of items —
+                         narrow with track_index if the result is truncated.
         """
-        return await client.execute("item_get_all", track_index=track_index)
+        if max_results <= 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "max_results must be > 0")
+        if max_results > 2000:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE,
+                                 "max_results cannot exceed 2000 (would blow context size)")
+        result = await client.execute("item_get_all", track_index=track_index)
+        payload = result.get("data", result)
+        items = payload.get("items", [])
+        if len(items) > max_results:
+            payload["items"] = items[:max_results]
+            payload["truncated"] = True
+            payload["returned"] = max_results
+        return result
 
     @mcp.tool()
     async def item_get_info(item_index: int) -> dict:
