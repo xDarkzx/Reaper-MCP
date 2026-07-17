@@ -35,6 +35,50 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Fixed
 
+- **`create_drum_pattern` / `create_chord_progression` mistimed everything
+  off 60 BPM.** Both built note `start`/`end` in quarter-notes and handed
+  them straight to `midi_insert_notes_batch`, which expects seconds (it
+  calls `MIDI_GetPPQPosFromProjTime`, a project-seconds API). The
+  auto-created item's *length* was correctly converted QN→seconds; the
+  individual note positions inside it never were. At 120 BPM a pattern
+  played back 2x further apart than written (a 16th-note kick pattern
+  landed like 8th notes); only exactly 60 BPM happened to work, which is
+  presumably why this went uncaught. Both tools now convert every note's
+  start/end through `* 60.0 / bpm` before building the batch.
+- **`item_split`'s reported `right_item.index` was wrong.** The Lua handler
+  assumed `SplitMediaItem` inserts the new piece at `item_index + 1`, but
+  like every other item-creation call in this file it actually appends to
+  the end of REAPER's global item list — the file already knew this and
+  worked around it correctly in `item_split_at_transients`,
+  `item_split_at_positions`, and `item_duplicate`; `item_split` was the one
+  handler still guessing. On any project with more than a couple of items,
+  a caller trusting the returned index would silently mutate an unrelated
+  item instead of the actual new split piece. Now resolves the real index
+  by pointer lookup, matching the other handlers.
+- **`stack_chop_layers` always read the source chop's pitch as 0.**
+  `item_get_info` never returned a `pitch` field — `build_item_info` (the
+  Lua struct backing every item-info response) simply didn't include the
+  take's `D_PITCH`. Since the documented workflow always pitches a chop to
+  a chord tone before stacking harmonies, every harmony layer came out
+  detuned from the lead by however much the lead had been shifted — not an
+  edge case, the normal path. Added `pitch` (and `playrate`, same call,
+  same gap) to `build_item_info`'s return.
+- **`midi_insert_notes_batch` didn't validate per-note `channel`.** Every
+  other numeric field (pitch, velocity, start/end) was checked; a note with
+  `"channel": 20` (or negative) passed straight through to REAPER. Added
+  the same 0-15 clamp `midi_insert_note` and `midi_insert_cc` already have.
+- **`midi_insert_notes_batch`'s size cap didn't use the shared limit.** It
+  hardcoded `50000` instead of importing `MAX_NOTES_PER_TRACK` (10000) from
+  `reaper_mcp_shared/constants.py`, whose own comment says "per-track limit
+  on notes in a single batch insert" — this call *is* that per-track batch
+  insert. `compose_arrangement` already wires up all three shared limits
+  correctly; this was the one path still using a disconnected magic number
+  5x more permissive than the documented ceiling.
+- **Stale docstring on `_stereo_width_fx`** (`mix_engine/master.py`) claimed
+  a 0.8-1.4 → 0.5-0.85 mapping the formula doesn't implement (the code is
+  self-consistent with its own "1.0 = neutral" comment; the one-line
+  docstring above it was leftover from an earlier version). Corrected the
+  comment to describe what the formula actually computes.
 - **`item_get_all` and `fx_list_installed` had no output cap.** A chop-heavy
   project can have hundreds of items; a power user's plugin folder can have
   500+ entries. `fx_list_installed` is documented as a call the AI should

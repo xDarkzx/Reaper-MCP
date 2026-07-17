@@ -312,8 +312,9 @@ def _stereo_width_fx(width: float) -> dict:
     If the preferred plugin is missing REAPER will fail to add it — that's
     fine, the chain continues without the width stage.
     """
-    # 0.0 = mono, 0.5 = normal, 1.0 = max width
-    # Map 0.8..1.4 → 0.5..0.85
+    # JS: Stereo Enhancer's param 0 range: 0.0 = mono, 0.5 = normal, 1.0 = max width.
+    # width=1.0 (neutral) maps to norm=0.5; each +/-1.0 of width moves norm by
+    # +/-0.5. Catalog values run ~1.0-1.2, e.g. width=1.2 -> norm=0.6.
     norm = 0.5 + (width - 1.0) * 0.5
     norm = max(0.0, min(1.0, norm))
     return {

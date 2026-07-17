@@ -164,6 +164,8 @@ def register(mcp: FastMCP):
 
         qn_per_step = 4.0 / steps_per_bar  # 16 steps → 0.25 QN per step
         gate = qn_per_step * 0.9            # notes end just under the next step
+        bpm = await _bpm(client)
+        qn_to_sec = 60.0 / bpm  # midi_insert_notes_batch expects seconds, not QN
 
         notes = []
         lanes_with_content = 0
@@ -194,8 +196,8 @@ def register(mcp: FastMCP):
                 notes.append({
                     "pitch": pitch,
                     "velocity": velocity,
-                    "start": start,
-                    "end": start + gate,
+                    "start": start * qn_to_sec,
+                    "end": (start + gate) * qn_to_sec,
                     "channel": channel,
                 })
                 had_hit = True
@@ -212,11 +214,10 @@ def register(mcp: FastMCP):
 
         created_item = False
         if item_index < 0:
-            bpm = await _bpm(client)
             total_qn = steps_per_bar * qn_per_step * bar_count
             # Item length has to contain start_qn offset + the full pattern.
             item_qn_length = start_qn + total_qn
-            length_sec = (item_qn_length * 60.0 / bpm) + 0.5
+            length_sec = (item_qn_length * qn_to_sec) + 0.5
             # Item always placed at project time 0 when auto-creating —
             # start_qn is the within-item offset, not a project offset.
             # Users wanting a specific project position should pre-create
@@ -294,6 +295,9 @@ def register(mcp: FastMCP):
         if not chord_names:
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "chords is empty")
 
+        bpm = await _bpm(client)
+        qn_to_sec = 60.0 / bpm  # midi_insert_notes_batch expects seconds, not QN
+
         notes = []
         cursor = start_qn
         parsed: list[dict] = []
@@ -310,8 +314,8 @@ def register(mcp: FastMCP):
                 notes.append({
                     "pitch": p,
                     "velocity": velocity,
-                    "start": cursor,
-                    "end": cursor + chord_duration_qn,
+                    "start": cursor * qn_to_sec,
+                    "end": (cursor + chord_duration_qn) * qn_to_sec,
                     "channel": channel,
                 })
             parsed.append({"name": name, "pitches": pitches, "start_qn": cursor})
@@ -325,11 +329,10 @@ def register(mcp: FastMCP):
 
         created_item = False
         if item_index < 0:
-            bpm = await _bpm(client)
             total_qn = chord_duration_qn * len(chord_names)
             # Item length has to contain start_qn offset + all chords.
             item_qn_length = start_qn + total_qn
-            length_sec = (item_qn_length * 60.0 / bpm) + 0.5
+            length_sec = (item_qn_length * qn_to_sec) + 0.5
             # Item always placed at project time 0 when auto-creating —
             # start_qn is the within-item offset, not a project offset.
             result = await client.execute(

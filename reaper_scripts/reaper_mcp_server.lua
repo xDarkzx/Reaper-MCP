@@ -460,9 +460,13 @@ local function build_item_info(item, idx)
   local take = reaper.GetActiveTake(item)
   local name = ""
   local is_midi = false
+  local pitch = 0.0
+  local playrate = 1.0
   if take then
     _, name = reaper.GetTakeName(take)
     is_midi = reaper.TakeIsMIDI(take)
+    pitch = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH")
+    playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
   end
   local tr = reaper.GetMediaItemTrack(item)
   local tr_num = reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
@@ -478,6 +482,8 @@ local function build_item_info(item, idx)
     selected = reaper.IsMediaItemSelected(item),
     mute = reaper.GetMediaItemInfo_Value(item, "B_MUTE") == 1,
     is_midi = is_midi,
+    pitch = pitch,
+    playrate = playrate,
     fade_in = reaper.GetMediaItemInfo_Value(item, "D_FADEINLEN"),
     fade_out = reaper.GetMediaItemInfo_Value(item, "D_FADEOUTLEN"),
     color = reaper.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR")
@@ -1201,7 +1207,15 @@ function item.item_split(p)
   local new_item = reaper.SplitMediaItem(it, p.position)
   if not new_item then return nil, "Split failed - position may be outside item bounds" end
   reaper.UpdateArrange()
-  return {left_item = build_item_info(it, math.floor(p.item_index)), right_item = build_item_info(new_item, math.floor(p.item_index) + 1)}
+  -- SplitMediaItem appends the new item at the end of REAPER's global item
+  -- list, not at item_index+1 — resolve its real index by pointer lookup
+  -- (same technique used by item_split_at_transients/item_split_at_positions).
+  local new_index = -1
+  local count_after = reaper.CountMediaItems(0)
+  for g = 0, count_after - 1 do
+    if reaper.GetMediaItem(0, g) == new_item then new_index = g; break end
+  end
+  return {left_item = build_item_info(it, math.floor(p.item_index)), right_item = build_item_info(new_item, new_index)}
 end
 
 function item.item_delete(p)

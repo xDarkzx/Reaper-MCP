@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp_shared.constants import MAX_NOTES_PER_TRACK
 
 
 def register(mcp: FastMCP):
@@ -74,10 +75,10 @@ def register(mcp: FastMCP):
                 ErrorCode.INVALID_PARAMETER,
                 f"`notes` must be a JSON array, got {type(parsed).__name__}",
             )
-        if len(parsed) > 50000:
+        if len(parsed) > MAX_NOTES_PER_TRACK:
             raise ReaperMCPError(
                 ErrorCode.VALUE_OUT_OF_RANGE,
-                f"Too many notes ({len(parsed)}) — split into batches ≤ 50000.",
+                f"Too many notes ({len(parsed)}) — split into batches ≤ {MAX_NOTES_PER_TRACK}.",
             )
         for i, n in enumerate(parsed):
             if not isinstance(n, dict):
@@ -111,6 +112,11 @@ def register(mcp: FastMCP):
                 raise ReaperMCPError(
                     ErrorCode.VALUE_OUT_OF_RANGE,
                     f"note[{i}] end ({n['end']}) must be > start ({n['start']})",
+                )
+            if "channel" in n and not (isinstance(n["channel"], (int, float)) and 0 <= n["channel"] <= 15):
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"note[{i}].channel must be 0-15, got {n['channel']!r}",
                 )
         return await client.execute("midi_insert_notes_batch",
                                     track_index=track_index, item_index=item_index, notes=notes)

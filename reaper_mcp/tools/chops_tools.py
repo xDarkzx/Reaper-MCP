@@ -1078,7 +1078,7 @@ def register(mcp: FastMCP):
             info = await client.execute("item_get_info", item_index=idx)
             d = info.get("data", info)
             src_pos = float(d.get("position", 0))
-            src_pitch = float(d.get("pitch", 0))  # may not be present, fallback 0
+            src_pitch = float(d.get("pitch", 0))
 
             for interval in intervals:
                 if interval == 0:
