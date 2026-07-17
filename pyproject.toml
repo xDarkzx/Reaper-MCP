@@ -45,3 +45,6 @@ packages = ["reaper_mcp", "reaper_mcp_shared"]
 
 [project.scripts]
 reaper-mcp = "reaper_mcp.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

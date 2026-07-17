@@ -5,6 +5,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp_shared.constants import MAX_ENVELOPE_POINTS_PER_CALL
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,9 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"points must be JSON array: {e}")
         if not isinstance(pts, list) or not pts:
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "points must be non-empty array")
-        if len(pts) > 50000:
+        if len(pts) > MAX_ENVELOPE_POINTS_PER_CALL:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE,
-                                 f"too many points: {len(pts)} (max 50000 per call)")
+                                 f"too many points: {len(pts)} (max {MAX_ENVELOPE_POINTS_PER_CALL} per call)")
         for i, pt in enumerate(pts):
             if not isinstance(pt, dict) or "time" not in pt or "value" not in pt:
                 raise ReaperMCPError(

@@ -2,6 +2,13 @@
 
 Get ReaperMCP running in 3 steps: **install ReaperMCP → load the Lua script in REAPER → connect your AI client**.
 
+All three install options below assume you start from a **cloned copy of this
+repo** — `reaper_scripts/reaper_mcp_server.lua` (the file REAPER actually
+runs) isn't published as a standalone download or bundled into the Python
+package; it only exists inside the repo. There is currently no supported
+`pip install reaper-mcp` from PyPI without the repo — always `git clone` (or
+download the repo ZIP) first.
+
 ---
 
 ## Step 1: Install ReaperMCP

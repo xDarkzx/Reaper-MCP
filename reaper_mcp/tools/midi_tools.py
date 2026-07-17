@@ -1,6 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
-from reaper_mcp_shared.constants import MAX_NOTES_PER_TRACK
+from reaper_mcp_shared.constants import MAX_NOTES_PER_TRACK, MAX_NOTES_READ_RESULTS
 
 
 def register(mcp: FastMCP):
@@ -134,9 +134,9 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "item_index must be >= 0")
         if max_results <= 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "max_results must be > 0")
-        if max_results > 10000:
+        if max_results > MAX_NOTES_READ_RESULTS:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE,
-                                 "max_results cannot exceed 10000 (would blow context size)")
+                                 f"max_results cannot exceed {MAX_NOTES_READ_RESULTS} (would blow context size)")
         return await client.execute("midi_get_notes", item_index=item_index, max_results=max_results)
 
     @mcp.tool()

@@ -34,3 +34,10 @@ MAX_LABEL_LENGTH = 1000          # Track/marker/item name max length
 MAX_COMPOSE_TRACKS = 50          # Per `compose_arrangement` / `configure_tracks` call
 MAX_NOTES_PER_TRACK = 10000      # Per-track limit on notes in a single batch insert
 MAX_TOTAL_NOTES_PER_CALL = 50000 # Sum of notes across all tracks in one call
+
+# Read-side context-size caps — distinct purpose from the write-side limits
+# above (those protect REAPER's main thread; these protect the calling
+# model's context window). Coincidentally close in magnitude to some of the
+# write-side limits, but tune independently — they bound different things.
+MAX_NOTES_READ_RESULTS = 10000       # `midi_get_notes` max_results ceiling
+MAX_ENVELOPE_POINTS_PER_CALL = 50000 # `envelope_add_points` points-per-call ceiling
