@@ -4,12 +4,17 @@ set -euo pipefail
 # Ensure PATH covers Homebrew on both Intel and Apple Silicon Macs so brew/python3
 # are findable even when this is launched from Finder (which strips PATH).
 if [[ "${OSTYPE:-}" == "darwin"* ]]; then
-    if [ -x /opt/homebrew/bin/brew ]; then
-        export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
-    fi
-    if [ -x /usr/local/bin/brew ]; then
-        export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
-    fi
+    # Process Intel first, Apple Silicon second: each iteration prepends, so
+    # the last one processed ends up first. That makes /opt/homebrew win by
+    # default when neither is already on PATH (e.g. launched from Finder,
+    # which strips PATH) — the correct default on Apple Silicon — while the
+    # "already on PATH" check below means a user's own correctly-ordered
+    # shell PATH is never touched either way.
+    for hb in /usr/local /opt/homebrew; do
+        if [ -x "$hb/bin/brew" ] && [[ ":$PATH:" != *":$hb/bin:"* ]]; then
+            export PATH="$hb/bin:$hb/sbin:$PATH"
+        fi
+    done
 fi
 
 echo ""
