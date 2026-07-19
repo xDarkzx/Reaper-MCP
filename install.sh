@@ -38,7 +38,7 @@ else
     echo ""
     read -rp " Would you like to install Python now? (y/n): " INSTALL_PY
     if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
+        if [[ "${OSTYPE:-}" == "darwin"* ]]; then
             if command -v brew &> /dev/null; then
                 echo " Installing Python via Homebrew..."
                 brew install python3
@@ -172,6 +172,37 @@ else
     exit 1
 fi
 
+# Verify the 'reaper-mcp' command on PATH actually points at the Python we
+# just installed with — not a stale install from a different Python (e.g.
+# an old Intel-Homebrew reaper-mcp shadowing a fresh Apple-Silicon one, or
+# any other case of two Pythons on the same machine). Claude Desktop will
+# run whatever 'reaper-mcp' resolves to, which may not be what this script
+# just set up.
+RESOLVED_CMD="$(command -v reaper-mcp 2>/dev/null || true)"
+if [ -z "$RESOLVED_CMD" ]; then
+    echo ""
+    echo "  NOTE: 'reaper-mcp' isn't on PATH yet in this shell session."
+    echo "  Open a new terminal (or source your shell rc file) before asking"
+    echo "  Claude to use it — Claude Desktop launches commands using your"
+    echo "  normal shell PATH, so if it doesn't resolve here, it won't there."
+elif [ -f "$RESOLVED_CMD" ] && head -1 "$RESOLVED_CMD" 2>/dev/null | grep -q '^#!'; then
+    SHEBANG_PY="$(head -1 "$RESOLVED_CMD" | sed 's/^#!//' | awk '{print $1}')"
+    ACTUAL_PY="$($PYTHON -c 'import sys; print(sys.executable)')"
+    if [ -n "$SHEBANG_PY" ] && [ "$SHEBANG_PY" != "$ACTUAL_PY" ]; then
+        echo ""
+        echo "  WARNING: 'reaper-mcp' on your PATH is bound to a DIFFERENT"
+        echo "  Python than the one just used to install it:"
+        echo "    On PATH now: $SHEBANG_PY"
+        echo "    Just used:   $ACTUAL_PY"
+        echo "  This usually means an older reaper-mcp install (a different"
+        echo "  Homebrew Python, a previous global pip install, etc.) is"
+        echo "  shadowing the one just installed. Run 'echo \$PATH' and check"
+        echo "  which directory containing 'reaper-mcp' comes first, or run"
+        echo "  'which -a reaper-mcp' to see every copy on PATH."
+        echo ""
+    fi
+fi
+
 # ── Configure Claude Desktop ──────────────────────────────
 echo ""
 echo "[3/4] Configuring Claude Desktop..."
@@ -180,7 +211,7 @@ read -rp "  Configure Claude Desktop for ReaperMCP? (y/n): " CONFIGURE_CLAUDE
 if [[ ! "$CONFIGURE_CLAUDE" =~ ^[Yy]$ ]]; then
     echo "  Skipped. See docs/INSTALLATION.md for manual setup."
 else
-    if [[ "$OSTYPE" == "darwin"* ]]; then
+    if [[ "${OSTYPE:-}" == "darwin"* ]]; then
         CONFIG_DIR="$HOME/Library/Application Support/Claude"
     else
         CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/Claude"
