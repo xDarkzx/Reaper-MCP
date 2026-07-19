@@ -6,6 +6,29 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **Automatic pre-action backup for destructive operations.** `wipe_all_midi`,
+  `track_delete`, `item_delete`, and `engine_mix`/`engine_master` with
+  `clean=True` (which removes existing FX before applying new ones) now
+  save a timestamped snapshot copy of the project — once per project per
+  session — before the destructive action runs, via a new shared
+  `reaper_mcp/safety.py` helper. This is on top of, not a replacement for,
+  REAPER's own undo history (already wrapped around every MCP action) — a
+  durable on-disk copy survives a crash or an undo-depth limit that
+  in-memory undo doesn't. A failed backup attempt logs a warning and lets
+  the requested action proceed rather than blocking it.
+- `project_backup(path)` — new tool: save a snapshot copy without changing
+  the project's active file (unlike `project_save_as`, the next
+  `project_save` still targets the original file). Powers the auto-backup
+  above; also directly usable.
+- `project_get_info` now returns `file_path` — the actual `.rpp` project
+  file path (empty if never saved). The pre-existing `path` field is the
+  recording/media directory, not the project file, and was easy to
+  mistake for one.
+- `00_core.md`: new guidance to describe destructive/hard-to-reverse
+  actions on an existing project and wait for confirmation before running
+  them, unless the user already gave clear specific instruction to do
+  exactly that. Additive work (new tracks, MIDI on empty tracks, adding
+  FX) proceeds directly as before.
 - **REAPER auto-start on launch.** `install.sh`/`install.bat` now drop a
   `__startup.lua` into REAPER's `Scripts` resource folder — REAPER runs any
   script with that exact name automatically on every launch, natively, no
@@ -23,11 +46,21 @@ All notable changes to ReaperMCP will be documented in this file.
   single combined drum-machine track) never matches the "kick" alias list
   (`kick`/`bd`/`bass drum`/`kik`), so a trap mix could report full success
   with 0 sidechains applied and no clue what happened.
-- `tests/test_patterns_tools.py` — 9 new tests covering the item-placement
-  and pattern-tiling fixes below. Full suite: 84 passing (was 75).
+- `tests/test_patterns_tools.py` and `tests/test_safety.py` — 16 new tests
+  covering the item-placement/pattern-tiling fixes and the auto-backup
+  decision logic below. Full suite: 91 passing (was 75).
 
 ### Fixed
 
+- **`project_save_as` never actually saved to the given path.** Its Lua
+  handler called `reaper.Main_SaveProject(0, path)` — that function's
+  second argument is a boolean ("force the Save-As dialog"), not a
+  filename. Passing a string there is truthy in Lua, so every call just
+  popped REAPER's interactive Save-As dialog and silently ignored the
+  path entirely, which would hang any non-interactive caller waiting on a
+  result. Switched to `Main_SaveProjectEx(0, path, 8)`, the actual
+  non-interactive save-to-path API (option bit 8 = make this the active
+  project file going forward, matching normal "Save As" semantics).
 - **`create_drum_pattern`/`create_chord_progression`: auto-created items
   always landed at project position 0, ignoring `start_qn`.** Since
   `midi_insert_notes_batch` writes notes at absolute project time (not

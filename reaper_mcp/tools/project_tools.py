@@ -50,7 +50,12 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def project_get_info() -> dict:
-        """Get project info (name, BPM, time sig, tracks, length, markers, render settings)."""
+        """Get project info (name, BPM, time sig, tracks, length, markers, render settings).
+
+        `path` is the recording/media directory (exists even for a brand
+        new, never-saved project). `file_path` is the actual .rpp project
+        file's path — empty string if this project has never been saved.
+        """
         return await client.execute("project_get_info")
 
     @mcp.tool()
@@ -75,13 +80,30 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def project_save_as(path: str) -> dict:
-        """Save project to new path.
+        """Save project to new path. This project's active file becomes
+        `path` going forward — subsequent project_save calls target it,
+        not the original file. Use project_backup instead if you want a
+        snapshot copy without switching your active file.
 
         Args:
             path: Absolute .rpp path.
         """
         path = _safe_path(path)
         return await client.execute("project_save_as", path=path)
+
+    @mcp.tool()
+    async def project_backup(path: str) -> dict:
+        """Save a snapshot copy to `path` WITHOUT changing this project's
+        active file — unlike project_save_as, your next project_save still
+        targets the original file. Use this before a risky/destructive
+        change (wiping MIDI, deleting tracks, clean=True mix passes) to
+        leave a recoverable copy of what existed beforehand.
+
+        Args:
+            path: Absolute .rpp path for the backup copy.
+        """
+        path = _safe_path(path)
+        return await client.execute("project_backup", path=path)
 
     @mcp.tool()
     async def project_export_audio(path: str, format: str = "wav") -> dict:

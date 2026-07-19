@@ -4,6 +4,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp.tools.compose_helpers import _build_live_track_map
+from reaper_mcp.safety import ensure_backup
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,15 @@ def register(mcp: FastMCP):
             style: Style name from the catalog (required).
             clean: Remove previously added master FX before applying (default True).
         """
+        backup = await ensure_backup(client) if clean else None
         # Ensure catalog is loaded
         import reaper_mcp.mix_engine.catalog  # noqa: F401
         from reaper_mcp.mix_engine.master import run_master_pipeline
 
-        return await run_master_pipeline(client, style, clean)
+        result = await run_master_pipeline(client, style, clean)
+        if isinstance(result, dict) and backup:
+            result["backup"] = backup
+        return result
 
     @mcp.tool()
     async def engine_mix(style: str = "", clean: bool = True) -> dict:
@@ -121,5 +126,9 @@ def register(mcp: FastMCP):
                          "and name your tracks with role keywords (kick, snare, pad, etc).",
             }
 
+        backup = await ensure_backup(client) if clean else None
         from reaper_mcp.mix_engine import run_mix_pipeline
-        return await run_mix_pipeline(client, track_map, style, clean)
+        result = await run_mix_pipeline(client, track_map, style, clean)
+        if isinstance(result, dict) and backup:
+            result["backup"] = backup
+        return result

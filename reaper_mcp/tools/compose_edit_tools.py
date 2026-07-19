@@ -6,6 +6,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.constants import MAX_COMPOSE_TRACKS
+from reaper_mcp.safety import ensure_backup
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def register(mcp: FastMCP):
             tracks: JSON array of track indices e.g. "[0,1,2]", or empty for all.
         """
         import os
+        backup = await ensure_backup(client)
         # Reset composition state
         state_path = os.path.join(os.environ.get("TEMP", "/tmp"),
                                   "reaper_mcp", "composed_tracks.json")
@@ -101,6 +103,8 @@ def register(mcp: FastMCP):
             except Exception as e:
                 logger.warning("Could not clear markers on wipe: %s", e)
 
+        if isinstance(result, dict) and backup:
+            result["backup"] = backup
         return result
 
     @mcp.tool()

@@ -844,10 +844,15 @@ local project = {}
 function project.project_get_info(p)
   local _, name = reaper.GetProjectName(0, "")
   local path = reaper.GetProjectPath("")
+  -- `path` above is the recording/media directory (exists even for a brand
+  -- new, never-saved project — e.g. the default "REAPER Media" folder) —
+  -- NOT the project's own .rpp file. file_path is the actual .rpp path,
+  -- empty string if this project has never been saved.
+  local _, file_path = reaper.EnumProjects(-1, "")
   local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
   local bpm, bpi = reaper.GetProjectTimeSignature2(0)
   return {
-    name = name, path = path,
+    name = name, path = path, file_path = file_path or "",
     sample_rate = math.floor(sr),
     bpm = bpm, time_sig_num = bpi,
     track_count = reaper.CountTracks(0),
@@ -878,9 +883,25 @@ end
 
 function project.project_save_as(p)
   if not p.path then return nil, "Missing parameter: path" end
-  reaper.Main_SaveProject(0, p.path)
+  -- Main_SaveProject's 2nd arg is a boolean ("force the Save-As dialog"),
+  -- NOT a filename — passing a string there is truthy in Lua, so this used
+  -- to just pop REAPER's interactive Save-As dialog and silently ignore
+  -- p.path entirely, hanging any non-interactive caller waiting on a
+  -- result. Main_SaveProjectEx takes a real filename; options&8 makes this
+  -- project's active file become p.path going forward, matching normal
+  -- "Save As" semantics (as opposed to "Save a Copy", which doesn't).
+  reaper.Main_SaveProjectEx(0, p.path, 8)
   local _, name = reaper.GetProjectName(0, "")
   return {name = name, path = p.path, saved = true}
+end
+
+-- Save a copy to `path` WITHOUT changing this project's own active file —
+-- unlike project_save_as, subsequent project_save calls still target the
+-- original file. Used internally as a pre-destructive-action safety net.
+function project.project_backup(p)
+  if not p.path then return nil, "Missing parameter: path" end
+  reaper.Main_SaveProjectEx(0, p.path, 0)
+  return {path = p.path, saved = true}
 end
 
 function project.project_export_audio(p)

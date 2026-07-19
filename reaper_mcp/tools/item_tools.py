@@ -3,6 +3,7 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp.safety import ensure_backup
 
 
 # Directories that should never be accessed
@@ -118,7 +119,11 @@ def register(mcp: FastMCP):
         """
         if item_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "item_index must be >= 0")
-        return await client.execute("item_delete", item_index=item_index)
+        backup = await ensure_backup(client)
+        result = await client.execute("item_delete", item_index=item_index)
+        if isinstance(result, dict) and backup:
+            result["backup"] = backup
+        return result
 
     @mcp.tool()
     async def item_move(item_index: int, new_position: float) -> dict:

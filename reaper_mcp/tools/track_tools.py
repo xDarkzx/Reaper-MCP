@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp.safety import ensure_backup
 
 
 def register(mcp: FastMCP):
@@ -43,7 +44,11 @@ def register(mcp: FastMCP):
         """
         if track_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
-        return await client.execute("track_delete", track_index=track_index)
+        backup = await ensure_backup(client)
+        result = await client.execute("track_delete", track_index=track_index)
+        if isinstance(result, dict) and backup:
+            result["backup"] = backup
+        return result
 
     @mcp.tool()
     async def track_rename(track_index: int, name: str) -> dict:
