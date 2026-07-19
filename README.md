@@ -163,7 +163,7 @@ The default 163-tool surface is designed for full-featured frontier models. Smal
 
 ### Mixing & Mastering Pipelines
 
-25 professional style profiles drive automatic EQ, compression, reverb buses, sidechain pumping, and mastering — each tuned to industry-standard LUFS targets and character.
+35 professional style profiles drive automatic EQ, compression, reverb buses, sidechain pumping, and mastering — each tuned to industry-standard LUFS targets and character.
 
 | Tool | What It Does |
 |------|-------------|
