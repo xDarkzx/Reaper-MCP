@@ -6,6 +6,24 @@ ReaperMCP gives AI full control over REAPER, but **you need VST instruments load
 
 ---
 
+## Known limitation: multi-sample libraries
+
+This applies broadly — most VST/AU instruments built around multi-sample or one-shot content (drum racks, sample-based kits, multi-sampled guitar/loop instruments) work this way, across effectively every plugin vendor. It's worth understanding up front if you're building trap, drill, hip-hop, or anything built on one-shot sample packs.
+
+**What the AI can't see:**
+- **Which sound is on which key.** A multi-sample kit with kick on one key, snare on another, hi-hat on a third — that mapping lives entirely inside the plugin's own private browser state. REAPER's automation API only exposes whatever parameters the plugin vendor chose to make automatable; per-key sample assignment isn't one of them, for any host, not just this one.
+- **How each sample behaves when triggered.** Some one-shots play their full length regardless of how long you hold the key (a loop or rhythm-guitar sample, for example). Others behave like a normal instrument — held while the key is down, released when it's not. There's no way to query this either; it's authored inside the sample/patch itself.
+
+**Why this can't be "solved" with better prompting or more MCP tools:** it isn't a gap in this project specifically — it's a hard boundary in how VST/AU plugins work. A plugin only exposes what its developer decided to expose to the host. Sample-browser internals are private by design, for every DAW, every AI, every host, always.
+
+**Current workarounds:**
+1. **Zero-setup path** — use instruments with a *published, standard* key layout instead of a custom one, so there's nothing to discover. Free examples: **MT Power Drum Kit 2** (General MIDI drum mapping — the same convention `create_drum_pattern` already assumes), or synths like **Vital**/**Surge XT** whose factory presets are browsable through REAPER's normal preset system (`fx_list_installed`, `fx_set_preset`) instead of a private in-plugin browser.
+2. **Custom-kit path** — tell the AI the mapping once in plain language ("this key is snare, that one is 808, that one is hi-hat, this guitar sustains while held, that one is a one-shot loop"). That's reading labels you can already see in the plugin's own UI, not a production skill. Save it into the project notes (`project_set_notes`) so it persists across sessions.
+
+This is a real, standing limitation, not a bug — there's no tool that reads it automatically today, and none planned unless there's real demand for it.
+
+---
+
 ## How It Works
 
 1. **You** set up tracks with VST instruments and patches (one-time setup)

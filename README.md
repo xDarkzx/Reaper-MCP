@@ -312,6 +312,8 @@ The AI will use `get_track_instruments` to detect what's loaded and compose for 
 
 > See the full **[Project Setup Guide](docs/PROJECT_SETUP.md)** for recommended instrument templates (orchestral, pop/rock, EDM) and what plugins to load.
 
+**Known limitation — multi-sample/one-shot instruments:** the AI can't see which sound is mapped to which key inside a plugin's own sample browser, or whether a given key is a one-shot vs. a held/sustained sample — that's private plugin state no host can read, true of most sample-based VSTs/AUs, not specific to this project. See [Project Setup Guide § multi-sample libraries](docs/PROJECT_SETUP.md#known-limitation-multi-sample-libraries) for the workaround.
+
 ---
 
 ## Troubleshooting
