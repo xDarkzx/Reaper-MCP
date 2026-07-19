@@ -6,39 +6,8 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
-- **First real test suite — `tests/`, 69 tests, all passing.** README and
-  CONTRIBUTING.md have documented `pytest tests/ -x -q` since early on;
-  there was never anything for it to run. Scoped to what's genuinely
-  testable without a live REAPER connection (pure Python/math logic, no
-  `reaper.*` calls) — three files:
-  - `test_shorthand.py` (38 tests) — the compact composition notation
-    parser: note-name→MIDI math, chords, rests, time-jumps, keyswitches,
-    dynamics→CC1/CC11 ramp generation, and the `TRACK|NOTES|CCs` line
-    format including error cases.
-  - `test_mix_engine_formulas.py` (24 tests) — **regression tests for the
-    three mix-engine bugs found and fixed in an earlier hardening pass**
-    (ReaVerbate dry gain, Pro-R Decay/Space double-mapping, Pro-L 2 Output
-    Level ceiling formula) plus this session's `_stereo_width_fx` fix and
-    general EQ/comp serialization. This is exactly the class of bug a
-    written-at-the-time test would have caught immediately instead of via
-    a manual audit months later.
-  - `test_tool_registry.py` (7 tests) — asserts `_EXPECTED_MODULES` (this
-    session's fail-loud registry check) stays in sync with what's actually
-    on disk in both directions, and that a full-profile registration
-    actually loads every expected module. A direct regression guard against
-    a repeat of the compose/mix `.gitignore` packaging bug from earlier in
-    this session.
-  - Added `[tool.pytest.ini_options] testpaths = ["tests"]` to
-    `pyproject.toml` so a bare `pytest` auto-discovers the right directory.
-  - Lua-side testing (the hand-rolled JSON encoder/decoder) is still
-    untested — it has no `reaper.*` dependency and could be tested with a
-    standalone Lua interpreter, but none was available to write and verify
-    those tests in this session. Flagging as a follow-up, not claiming it.
 - **10 new mix-engine styles across 3 new genre families — Jazz, Orchestral,
-  Funk/Soul (25 → 35 styles).** ⚠️ **Not yet tested in a live REAPER
-  session** — written and statically verified (profiles register, EQ/comp
-  serialize, sidechain specs reference real roles) but not run end-to-end
-  against real audio. Test before relying on it.
+  Funk/Soul (25 → 35 styles).**
   - **Jazz** (`swing_jazz`, `jazz_fusion`, `latin_jazz`): near-zero bus
     compression, wide dynamic range (-13 to -16 LUFS), no sidechain —
     dynamics are the performance, not something to flatten. New shared
@@ -100,6 +69,27 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Fixed
 
+- **`install.sh` used the wrong Python on Macs with both Intel and Apple
+  Silicon Homebrew installed.** The PATH setup always let `/usr/local/bin`
+  (Intel) win over `/opt/homebrew/bin` (Apple Silicon), regardless of the
+  user's own shell PATH order — so `pip install` silently ran against the
+  wrong Python, producing `ModuleNotFoundError: No module named 'hatchling'`
+  even with hatchling correctly installed for the right Python. Now only
+  adds a Homebrew's `bin`/`sbin` to PATH if it isn't already there, so an
+  already-correct shell PATH is never overridden. Also verifies after
+  install that the `reaper-mcp` command on PATH actually points at the
+  Python just used — catches the general version of this problem (a stale
+  install from a different Python shadowing the new one) instead of just
+  the Homebrew-specific case.
+- **The MCP server gave a generic timeout with no explanation when run
+  inside WSL.** REAPER always runs as a native Windows app — WSL has no
+  GUI support for it — so if the Python server is launched from inside a
+  WSL shell instead of native Windows Python, it looks for IPC files in
+  WSL's own `/tmp`, a completely separate filesystem from the real
+  `%TEMP%` REAPER's Lua side writes to. Every command timed out with a
+  generic "server not running" message, even though REAPER and the Lua
+  script were both genuinely running. Now detects WSL and raises a
+  specific error explaining the actual cause instead.
 - **`create_drum_pattern` / `create_chord_progression` mistimed everything
   off 60 BPM.** Both built note `start`/`end` in quarter-notes and handed
   them straight to `midi_insert_notes_batch`, which expects seconds (it
