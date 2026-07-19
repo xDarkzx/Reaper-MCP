@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 import time
 
 from reaper_mcp_shared.constants import Connection, Timeouts
@@ -10,6 +11,28 @@ from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 _HEARTBEAT_STALE_SECONDS = 60
 
 
+def _is_wsl() -> bool:
+    """True if this Python process is running inside WSL (not native Windows).
+
+    Matters because REAPER itself always runs as a native Windows .exe — WSL
+    has no GUI app support for a full DAW — so if the *Python* side is
+    launched from inside WSL instead of native Windows Python,
+    tempfile.gettempdir() resolves to WSL's own /tmp (a separate ext4
+    filesystem inside the WSL VM), never the real %TEMP% REAPER's Lua side
+    writes IPC files to. The two sides silently never see each other's
+    files — every command times out with no indication why.
+    """
+    if sys.platform != "linux":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 class ReaperClient:
     def __init__(self):
         self._lock = asyncio.Lock()
@@ -17,6 +40,20 @@ class ReaperClient:
 
     def _check_server(self):
         if not os.path.exists(Connection.LOCK_FILE):
+            if _is_wsl():
+                raise ReaperMCPError(
+                    ErrorCode.CONNECTION_REFUSED,
+                    f"REAPER MCP server not running — but also: this Python process "
+                    f"is running INSIDE WSL, looking for IPC files at {Connection.IPC_DIR} "
+                    f"(WSL's own filesystem). REAPER itself always runs as a native "
+                    f"Windows app and writes its IPC files to Windows' %TEMP%, a "
+                    f"completely different filesystem — the two sides can never see "
+                    f"each other's files this way, even with REAPER and the Lua "
+                    f"script both actually running. Run this Python server as native "
+                    f"Windows Python instead (not from inside a WSL shell) — e.g. "
+                    f"point Claude Desktop's config at the Windows python.exe / "
+                    f"reaper-mcp.exe, not the WSL one.",
+                )
             raise ReaperMCPError(
                 ErrorCode.CONNECTION_REFUSED,
                 "REAPER MCP server not running. "
