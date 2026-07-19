@@ -8,7 +8,7 @@
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-purple.svg" alt="MCP Compatible" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.3.0-orange.svg" alt="v0.3.0" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.4.0-orange.svg" alt="v0.4.0" /></a>
   <a href="#development"><img src="https://img.shields.io/badge/tests-pytest-0A9EDC.svg" alt="pytest" /></a>
   <a href="https://www.reaper.fm/"><img src="https://img.shields.io/badge/REAPER-7%2B-red.svg" alt="REAPER 7+" /></a>
 </p>

@@ -2,7 +2,7 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-07-20
 
 ### Added
 
@@ -33,7 +33,7 @@ All notable changes to ReaperMCP will be documented in this file.
     under the other fights the pocket instead of serving it. `neo_soul`
     uses a genuinely-pro technique instead — a subtle vocal→keys/horns
     duck (amount 0.2-0.25, slow release) so the vocal breathes room without
-    riding a faded through every phrase; `disco_funk` uses a light
+    riding a fader through every phrase; `disco_funk` uses a light
     kick→strings duck, since disco sits closer to dance music than the
     other three. New shared presets: `slap_bass`, `electric_piano`,
     `horns_section`, `vocal_soul`, `comp_funk_punch`, `comp_soul_vocal`,
@@ -66,6 +66,16 @@ All notable changes to ReaperMCP will be documented in this file.
   display label. Used internally by the mix engine to tag its own FX with
   the `[MIX] ` prefix so cleanup can distinguish them from user-added FX.
   Requires REAPER 6.37+. Tool surface: 149 → 150.
+- **High-affordance pattern tools** (`patterns_tools.py`, 2 tools) — dedicated MCP tools for the most common MIDI writing tasks, so the AI reaches for them directly without having to learn `compose_arrangement`'s shorthand grammar:
+  - `create_drum_pattern(track_index, pattern, …)` — multi-lane step-sequencer notation (k/s/h/o/c/r/t/l/i/p/b for GM drums, `.` for rests, 16 steps per bar by default). Auto-creates the MIDI item, defaults to GM drum channel 9.
+  - `create_chord_progression(track_index, chords, …)` — parses chord names like `"Cm7, Fm7, Bb7, Eb"` or `"Am - F - C - G"` into voiced MIDI. Supports major/minor/dim/aug/sus2/sus4/6/7/maj7/m7/9/m9/maj9/11/13/add9/dim7/7sus4.
+- **Tool profiles** via `REAPER_MCP_PROFILE` env var — trim the tool surface down to a workflow-specific subset so it fits under LLM tool-count limits (Groq Llama 3 = 128, smaller models lower). Profiles: `full` (default), `composition`, `mixing`, `analysis`, `minimal`. Invalid values log a warning and fall back to `full`. Startup banner writes the active profile and module count to stderr.
+- **Audio analysis tools** (`analysis_tools.py`, 4 tools) — objective mix metrics from a rendered WAV, designed to pair with `project_export_audio` + `engine_master` for a `measure → correct` loop:
+  - `analyze_loudness(wav_path, reference)` — integrated LUFS (pyloudnorm), true peak, RMS, crest factor, delta against streaming / broadcast / cinema / club targets.
+  - `analyze_clipping(wav_path, threshold_db)` — per-channel and total sample-clip counts at a configurable threshold.
+  - `analyze_frequency_spectrum(wav_path)` — 7-band energy split (sub / bass / low-mid / mid / high-mid / presence / brilliance), spectral centroid, tonal-balance hint.
+  - `analyze_stereo_field(wav_path)` — phase correlation, mid / side RMS, side-to-mid ratio, mono-compatibility hint.
+- **Optional `[analysis]` extras** — `numpy`, `soundfile`, `pyloudnorm`. Install with `pip install 'reaper-mcp[analysis]'`. Tools degrade silently and log a one-line hint to stderr if deps are missing, so the server stays up.
 
 ### Fixed
 
@@ -90,6 +100,18 @@ All notable changes to ReaperMCP will be documented in this file.
   generic "server not running" message, even though REAPER and the Lua
   script were both genuinely running. Now detects WSL and raises a
   specific error explaining the actual cause instead.
+- **Removed `reaper_scripts/reaper_mcp_server.eel`** — a 1700-line
+  abandoned TCP-socket-on-port-9876 prototype of the server from before
+  the project settled on file-based IPC. Zero references anywhere in the
+  codebase, touched once at the v0.3.0 commit. Sitting in the same folder
+  as the real `reaper_mcp_server.lua` with a near-identical name, it was a
+  real footgun — loading the wrong script into REAPER produced an
+  inexplicable silent failure with no indication why.
+- **`envelope_add_points` and `midi_get_notes` had hardcoded size caps
+  duplicating undocumented values.** Same drift risk as the
+  `MAX_NOTES_PER_TRACK` fix below — a bare number with no named constant.
+  Added `MAX_ENVELOPE_POINTS_PER_CALL` and `MAX_NOTES_READ_RESULTS` to
+  `reaper_mcp_shared/constants.py` and wired both call sites to them.
 - **`create_drum_pattern` / `create_chord_progression` mistimed everything
   off 60 BPM.** Both built note `start`/`end` in quarter-notes and handed
   them straight to `midi_insert_notes_batch`, which expects seconds (it
@@ -118,6 +140,14 @@ All notable changes to ReaperMCP will be documented in this file.
   detuned from the lead by however much the lead had been shifted — not an
   edge case, the normal path. Added `pitch` (and `playrate`, same call,
   same gap) to `build_item_info`'s return.
+- **`item_get_source_info` / `chops_create_virtual_slice` resolved the
+  wrong file for reversed or section-wrapped takes.** A SECTION or
+  reversed take wraps the real audio source; reading the filename off the
+  immediate take source could resolve to the wrapper object instead of
+  the actual file on disk. Now walks up to the root PCM source via
+  `GetMediaSourceParent` first. Also added optional `playrate`
+  pass-through to `chops_create_virtual_slice` so chops stay in-tempo
+  when the source material's native tempo differs from the project's.
 - **`midi_insert_notes_batch` didn't validate per-note `channel`.** Every
   other numeric field (pitch, velocity, start/end) was checked; a note with
   `"channel": 20` (or negative) passed straight through to REAPER. Added
@@ -200,98 +230,66 @@ All notable changes to ReaperMCP will be documented in this file.
   `"%.6f"` format truncated MIDI positions to microsecond granularity
   (roughly 48 samples at 48 kHz), which caused quiet drift on sub-sample
   batch inserts. Now `"%.17g"` — full IEEE-754 double round-trip.
-
-### Fixed
-
-Hardening pass following a full code audit. No API changes — all behaviour
-fixes, validation improvements, and bug fixes.
-
-**Mix engine (critical):**
-- `mix_engine/plugins.py` — ReaVerbate dry gain was hardcoded to 1.0 on reverb
-  return buses, meaning the dry signal passed through the bus alongside the
-  wet tail, doubling the return level (~3 dB too loud). Now 0.0.
-- `mix_engine/plugins.py` — Pro-R `Decay` parameter was being fed `room_size`,
-  which collapsed the decay tail when room_size was small and duplicated Space
-  otherwise. Removed the redundant Decay mapping; Pro-R's Space already
-  encodes decay behaviour.
-- `mix_engine/master.py` — FabFilter Pro-L 2 `Output Level` formula was
-  `0.5 + true_peak_db / 60.0`, which for a target of -1 dBTP produced a
-  ceiling at ~-31 dBTP (limiter barely engaged). Correct formula is
-  `1.0 + true_peak_db / 60.0`, giving a ceiling at -1 dBTP as intended.
-- `mix_engine/__init__.py` — cleanup now logs every FX it removes (at INFO
-  level) plus a summary count, so users can audit what `clean=True` did.
-  Added a `LIMITATION` docstring warning that substring matches on
-  ReaEQ / ReaComp / Pro-Q 3 / Pro-C 2 will also remove user-added instances
-  on tracks being mixed (scoped to `track_indices` only, other tracks safe).
-
-**Core IPC:**
-- `reaper_client.py` — JSON parse-failure retries now require the response
-  file's mtime to CHANGE before counting another failure. Previously a
-  partial mid-write response would hit max_parse_failures in 150 ms even
-  when the real response was still on its way, rejecting legitimate
-  responses under heavy write contention.
-- `reaper_client.py` — `UnicodeDecodeError` is now caught and treated as a
-  parse failure (same retry path). Previously it propagated as an
-  unhandled exception if Lua wrote a byte that wasn't valid UTF-8.
-
-**Lua bridge:**
-- `reaper_mcp_server.lua` — `\uXXXX` JSON escapes are now decoded properly
-  to UTF-8 (was being dropped to `?`). Track / plugin names with accented
-  or CJK characters now round-trip correctly.
-- `reaper_mcp_server.lua` — directory creation no longer uses `os.execute`
-  with a shell-concatenated path. Uses REAPER's native
-  `RecursiveCreateDirectory` API when available (safer against adversarial
-  TMPDIR values), with a defensive-quoted shell fallback for very old REAPER.
-- `reaper_mcp_server.lua` — added `Undo_BeginBlock` / `Undo_EndBlock` wrapping
-  for every MIDI and item/track mutation that lacked it: `midi_insert_note`,
-  `midi_insert_notes_batch`, `midi_set_note`, `midi_delete_note`,
-  `midi_delete_all_notes`, `midi_insert_cc`, `midi_delete_cc`,
-  `item_create_midi`, `track_create`. Undo history in REAPER now shows
-  readable `MCP: …` labels for every change the AI made, so users can
-  undo specific AI edits individually.
-
-**Tool modules:**
-- `tools/patterns_tools.py` — `start_qn` was being applied twice (once to the
-  auto-created item's project position and again to every note inside the
-  item), so patterns appeared at 2 × start_qn instead of start_qn. Now notes
-  are placed relative to the item and the item always starts at project 0
-  when auto-creating; users wanting a specific project position should
-  pre-create the item with `item_create_midi`.
-- `tools/patterns_tools.py` — chord regex now accepts lowercase roots
-  (`"cm7"` parses the same as `"Cm7"`). Previously lowercase chord names
-  silently returned None and were listed under `failed_chords`.
-- `tools/analysis_tools.py` — `analyze_loudness` guards against silent audio
-  (previously returned non-JSON `-inf` LUFS). `analyze_frequency_spectrum`
-  guards against divide-by-zero when magnitudes sum to 0. `analyze_stereo_field`
-  guards against divide-by-zero when either channel is constant / silent
-  (was returning `NaN`, which breaks JSON serialisation).
-- `tools/midi_tools.py` — `midi_insert_notes_batch` now validates the `notes`
-  JSON client-side: parses it, checks shape is a list, enforces 50 000-note
-  ceiling, validates every note has pitch (0-127), velocity (1-127), numeric
-  start/end with end > start. Lua-side errors for malformed batches are now
-  rare; when they happen, users get a precise Python-side message pointing
-  to the bad note index and field.
-- `tools/compose_edit_tools.py` — the "all" sentinel for `tracks=` is now
-  case-insensitive and tolerates surrounding whitespace / quotes. Previously
-  only `"all"`, `'all'`, and `"\"all\""` worked; `" ALL "` or `"All"` fell
-  through to JSON parsing and raised an obscure error.
-
-**Registry:**
-- `tool_registry.py` — after registration, warns if a profile references a
-  module that isn't importable (profile definition out of sync with disk).
-
-### Added
-
-- **High-affordance pattern tools** (`patterns_tools.py`, 2 tools) — dedicated MCP tools for the most common MIDI writing tasks, so the AI reaches for them directly without having to learn `compose_arrangement`'s shorthand grammar:
-  - `create_drum_pattern(track_index, pattern, …)` — multi-lane step-sequencer notation (k/s/h/o/c/r/t/l/i/p/b for GM drums, `.` for rests, 16 steps per bar by default). Auto-creates the MIDI item, defaults to GM drum channel 9.
-  - `create_chord_progression(track_index, chords, …)` — parses chord names like `"Cm7, Fm7, Bb7, Eb"` or `"Am - F - C - G"` into voiced MIDI. Supports major/minor/dim/aug/sus2/sus4/6/7/maj7/m7/9/m9/maj9/11/13/add9/dim7/7sus4.
-- **Tool profiles** via `REAPER_MCP_PROFILE` env var — trim the 149-tool surface down to a workflow-specific subset so it fits under LLM tool-count limits (Groq Llama 3 = 128, smaller models lower). Profiles: `full` (default, ~149), `composition` (~106), `mixing` (~67), `analysis` (~47), `minimal` (~40). Invalid values log a warning and fall back to `full`. Startup banner writes the active profile and module count to stderr.
-- **Audio analysis tools** (`analysis_tools.py`, 4 tools) — objective mix metrics from a rendered WAV, designed to pair with `project_export_audio` + `engine_master` for a `measure → correct` loop:
-  - `analyze_loudness(wav_path, reference)` — integrated LUFS (pyloudnorm), true peak, RMS, crest factor, delta against streaming / broadcast / cinema / club targets.
-  - `analyze_clipping(wav_path, threshold_db)` — per-channel and total sample-clip counts at a configurable threshold.
-  - `analyze_frequency_spectrum(wav_path)` — 7-band energy split (sub / bass / low-mid / mid / high-mid / presence / brilliance), spectral centroid, tonal-balance hint.
-  - `analyze_stereo_field(wav_path)` — phase correlation, mid / side RMS, side-to-mid ratio, mono-compatibility hint.
-- **Optional `[analysis]` extras** — `numpy`, `soundfile`, `pyloudnorm`. Install with `pip install 'reaper-mcp[analysis]'`. Tools degrade silently and log a one-line hint to stderr if deps are missing, so the server stays up.
+- **Hardening pass following a full code audit.** No API changes — all
+  behaviour fixes, validation improvements, and bug fixes:
+  - `mix_engine/plugins.py` — ReaVerbate dry gain was hardcoded to 1.0 on
+    reverb return buses, meaning the dry signal passed through the bus
+    alongside the wet tail, doubling the return level (~3 dB too loud).
+    Now 0.0.
+  - `mix_engine/plugins.py` — Pro-R `Decay` parameter was being fed
+    `room_size`, which collapsed the decay tail when room_size was small
+    and duplicated Space otherwise. Removed the redundant Decay mapping;
+    Pro-R's Space already encodes decay behaviour.
+  - `mix_engine/master.py` — FabFilter Pro-L 2 `Output Level` formula was
+    `0.5 + true_peak_db / 60.0`, which for a target of -1 dBTP produced a
+    ceiling at ~-31 dBTP (limiter barely engaged). Correct formula is
+    `1.0 + true_peak_db / 60.0`, giving a ceiling at -1 dBTP as intended.
+  - `mix_engine/__init__.py` — cleanup now logs every FX it removes (at
+    INFO level) plus a summary count, so users can audit what
+    `clean=True` did.
+  - `reaper_client.py` — JSON parse-failure retries now require the
+    response file's mtime to CHANGE before counting another failure.
+    Previously a partial mid-write response would hit max_parse_failures
+    in 150 ms even when the real response was still on its way, rejecting
+    legitimate responses under heavy write contention.
+  - `reaper_client.py` — `UnicodeDecodeError` is now caught and treated as
+    a parse failure (same retry path), instead of propagating as an
+    unhandled exception if Lua wrote a byte that wasn't valid UTF-8.
+  - `reaper_mcp_server.lua` — `\uXXXX` JSON escapes are now decoded
+    properly to UTF-8 (was being dropped to `?`). Track / plugin names
+    with accented or CJK characters now round-trip correctly.
+  - `reaper_mcp_server.lua` — directory creation no longer uses
+    `os.execute` with a shell-concatenated path. Uses REAPER's native
+    `RecursiveCreateDirectory` API when available (safer against
+    adversarial TMPDIR values), with a defensive-quoted shell fallback
+    for very old REAPER.
+  - `reaper_mcp_server.lua` — added `Undo_BeginBlock` / `Undo_EndBlock`
+    wrapping for every MIDI and item/track mutation that lacked it, so
+    Undo history in REAPER shows readable `MCP: …` labels for every
+    change the AI made.
+  - `tools/patterns_tools.py` — `start_qn` was being applied twice (once
+    to the auto-created item's project position and again to every note
+    inside the item), so patterns appeared at 2 × start_qn instead of
+    start_qn. Now notes are placed relative to the item and the item
+    always starts at project 0 when auto-creating.
+  - `tools/patterns_tools.py` — chord regex now accepts lowercase roots
+    (`"cm7"` parses the same as `"Cm7"`). Previously lowercase chord names
+    silently returned None and were listed under `failed_chords`.
+  - `tools/analysis_tools.py` — `analyze_loudness` guards against silent
+    audio (previously returned non-JSON `-inf` LUFS); `analyze_frequency_spectrum`
+    guards against divide-by-zero when magnitudes sum to 0;
+    `analyze_stereo_field` guards against divide-by-zero when either
+    channel is constant/silent (was returning `NaN`, which breaks JSON
+    serialisation).
+  - `tools/midi_tools.py` — `midi_insert_notes_batch` now validates the
+    `notes` JSON client-side: parses it, checks shape is a list, enforces
+    a note-count ceiling, validates every note has pitch (0-127),
+    velocity (1-127), numeric start/end with end > start.
+  - `tools/compose_edit_tools.py` — the "all" sentinel for `tracks=` is
+    now case-insensitive and tolerates surrounding whitespace/quotes.
+  - `tool_registry.py` — warns if a profile references a module that
+    isn't importable (profile definition out of sync with disk) — later
+    extended to cover the default `full` profile too (see above).
 
 ## [0.3.0] - 2026-04-17
 
