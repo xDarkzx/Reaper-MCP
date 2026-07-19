@@ -27,7 +27,7 @@ echo "  Platform: $(uname -s) $(uname -m)"
 echo ""
 
 # ── Check Python ──────────────────────────────────────────
-echo "[1/4] Checking Python..."
+echo "[1/5] Checking Python..."
 if command -v python3 &> /dev/null; then
     PYTHON=python3
 elif command -v python &> /dev/null; then
@@ -114,7 +114,7 @@ fi
 
 # ── Install reaper-mcp ────────────────────────────────────
 echo ""
-echo "[2/4] Installing reaper-mcp..."
+echo "[2/5] Installing reaper-mcp..."
 
 # Check if pip is available
 if ! $PYTHON -m pip --version &> /dev/null; then
@@ -203,9 +203,57 @@ elif [ -f "$RESOLVED_CMD" ] && head -1 "$RESOLVED_CMD" 2>/dev/null | grep -q '^#
     fi
 fi
 
+# ── Set up REAPER auto-start ──────────────────────────────
+# REAPER auto-runs any script literally named __startup.lua found in its
+# Scripts resource folder, on every launch, with no Action-list registration
+# needed. This removes the "load the Lua script every time REAPER opens"
+# manual step for anyone who runs this installer.
+echo ""
+echo "[3/5] Setting up REAPER auto-start..."
+
+if [[ "${OSTYPE:-}" == "darwin"* ]]; then
+    REAPER_RESOURCE_DIR="$HOME/Library/Application Support/REAPER"
+else
+    REAPER_RESOURCE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/REAPER"
+fi
+REAPER_SCRIPTS_DIR="$REAPER_RESOURCE_DIR/Scripts"
+STARTUP_SCRIPT="$REAPER_SCRIPTS_DIR/__startup.lua"
+LOAD_LINE="dofile([[$SCRIPT_DIR/reaper_scripts/reaper_mcp_server.lua]])"
+
+if [ ! -d "$REAPER_SCRIPTS_DIR" ]; then
+    echo "  REAPER hasn't been run yet (no Scripts folder found) — skipping."
+    echo "  Run REAPER once, then re-run this installer to enable auto-start,"
+    echo "  or load the script manually (see the final instructions below)."
+elif [ -f "$STARTUP_SCRIPT" ] && grep -qF "reaper_mcp_server.lua" "$STARTUP_SCRIPT" 2>/dev/null; then
+    echo "  Auto-start already configured — skipping."
+elif [ -f "$STARTUP_SCRIPT" ]; then
+    # A startup script already exists for something else — append rather
+    # than overwrite it, so we don't clobber the user's own setup.
+    cp "$STARTUP_SCRIPT" "$STARTUP_SCRIPT.bak"
+    {
+        echo ""
+        echo "-- Added by the ReaperMCP installer"
+        echo "reaper.defer(function() reaper.defer(function() $LOAD_LINE end) end)"
+    } >> "$STARTUP_SCRIPT"
+    echo "  Found an existing __startup.lua — backed it up to __startup.lua.bak"
+    echo "  and appended ReaperMCP's auto-start to the end of it."
+else
+    cat > "$STARTUP_SCRIPT" << EOF
+-- Auto-start ReaperMCP server on REAPER launch.
+-- Double-defer ensures REAPER is fully initialized first.
+reaper.defer(function()
+  reaper.defer(function()
+    $LOAD_LINE
+  end)
+end)
+EOF
+    echo "  Created: $STARTUP_SCRIPT"
+    echo "  ReaperMCP will now load automatically every time REAPER starts."
+fi
+
 # ── Configure Claude Desktop ──────────────────────────────
 echo ""
-echo "[3/4] Configuring Claude Desktop..."
+echo "[4/5] Configuring Claude Desktop..."
 
 read -rp "  Configure Claude Desktop for ReaperMCP? (y/n): " CONFIGURE_CLAUDE
 if [[ ! "$CONFIGURE_CLAUDE" =~ ^[Yy]$ ]]; then
@@ -256,25 +304,35 @@ fi
 
 # ── Done ──────────────────────────────────────────────────
 echo ""
-echo "[4/4] Done!"
+echo "[5/5] Done!"
 echo ""
 echo " ============================================"
 echo "  SETUP COMPLETE!"
 echo " ============================================"
 echo ""
-echo " Next steps:"
-echo ""
-echo "  1. Open REAPER"
-echo "  2. Load the Lua script:"
-echo "     Actions > Show action list > Load ReaScript..."
-echo "     Select: reaper_scripts/reaper_mcp_server.lua"
-echo "     Click \"Run\""
-echo "  3. Restart Claude Desktop (if it's open)"
-echo "  4. Ask Claude: \"Get info about the current REAPER project\""
-echo ""
-echo " The Lua script must be running in REAPER for MCP to work."
-echo " You only need to load it once - REAPER remembers it."
-echo ""
+if [ -f "$STARTUP_SCRIPT" ] && grep -qF "reaper_mcp_server.lua" "$STARTUP_SCRIPT" 2>/dev/null; then
+    echo " Next steps:"
+    echo ""
+    echo "  1. Open REAPER (or restart it if it's already open) — ReaperMCP"
+    echo "     loads automatically now, nothing to click."
+    echo "  2. Restart Claude Desktop (if it's open)"
+    echo "  3. Ask Claude: \"Get info about the current REAPER project\""
+    echo ""
+else
+    echo " Next steps:"
+    echo ""
+    echo "  1. Open REAPER"
+    echo "  2. Load the Lua script:"
+    echo "     Actions > Show action list > Load ReaScript..."
+    echo "     Select: reaper_scripts/reaper_mcp_server.lua"
+    echo "     Click \"Run\""
+    echo "  3. Restart Claude Desktop (if it's open)"
+    echo "  4. Ask Claude: \"Get info about the current REAPER project\""
+    echo ""
+    echo " The Lua script must be running in REAPER for MCP to work."
+    echo " You only need to load it once - REAPER remembers it."
+    echo ""
+fi
 echo " Docs: https://github.com/xDarkzx/Reaper-MCP"
 echo " ============================================"
 echo ""

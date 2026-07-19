@@ -2,6 +2,62 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [0.5.0] - 2026-07-20
+
+### Added
+
+- **REAPER auto-start on launch.** `install.sh`/`install.bat` now drop a
+  `__startup.lua` into REAPER's `Scripts` resource folder — REAPER runs any
+  script with that exact name automatically on every launch, natively, no
+  Action-list registration needed. Removes the "load the Lua script every
+  time REAPER opens" manual step for anyone who used the installer. If a
+  `__startup.lua` already exists for something else, the installer appends
+  to it (backed up as `__startup.lua.bak`) instead of overwriting it. Falls
+  back to the old manual-load instructions if REAPER's resource folder
+  doesn't exist yet (i.e. REAPER has never been run) — re-running the
+  installer after REAPER's first launch picks it up.
+- `engine_mix`'s v2 pipeline now returns `unmatched_tracks` — tracks whose
+  name didn't match any role alias got no volume/EQ/comp, and any sidechain
+  depending on them (e.g. kick→bass) silently never fired, with nothing in
+  the response indicating why. A track named "Drums" (very normal for a
+  single combined drum-machine track) never matches the "kick" alias list
+  (`kick`/`bd`/`bass drum`/`kik`), so a trap mix could report full success
+  with 0 sidechains applied and no clue what happened.
+- `tests/test_patterns_tools.py` — 9 new tests covering the item-placement
+  and pattern-tiling fixes below. Full suite: 84 passing (was 75).
+
+### Fixed
+
+- **`create_drum_pattern`/`create_chord_progression`: auto-created items
+  always landed at project position 0, ignoring `start_qn`.** Since
+  `midi_insert_notes_batch` writes notes at absolute project time (not
+  item-relative), a second call for a later section (e.g. a verse at bar 5
+  after an intro at bar 1) created an item that overlapped the first one at
+  position 0 instead of sitting after it — reproduced live: two 4-bar
+  sections both landed with their item boundary at t=0. Item position now
+  equals `start_qn` converted to seconds.
+- **A drum-pattern lane shorter than `steps_per_bar * bar_count` silently
+  only filled the first bar, leaving the rest empty — no warning.** Easy to
+  trigger by assuming a 1-bar line auto-repeats across `bar_count` bars (a
+  reasonable assumption the tool didn't honor). Now a line exactly
+  `steps_per_bar` long auto-tiles across all bars; any other mismatched
+  length raises an error instead of quietly truncating.
+- The first fix above initially added a small trailing pad to auto-created
+  item lengths as a safety margin; that pad itself caused a smaller overlap
+  between two sections placed back-to-back with no gap (confirmed
+  proportional: a 0.5s pad overlapped by 0.5s, a 0.05s pad by 0.05s).
+  Removed entirely — each drum note already ends before the pattern's
+  nominal end (see the `gate` shortening), and a chord's last note ends
+  exactly at the same point the item does, so no pad was ever needed.
+- `compose_arrangement` had a `bpm` parameter, documented as "Project BPM
+  (default 120)", that was never referenced anywhere in the function body —
+  a dead, misleading parameter. Shorthand note/CC times are raw seconds,
+  entirely tempo-independent (unlike `create_drum_pattern`/
+  `create_chord_progression`, which take quarter-notes and convert using
+  the live project BPM). Removed the parameter; docstring now states the
+  seconds-vs-quarter-notes split explicitly so the two conventions aren't
+  mixed up.
+
 ## [0.4.0] - 2026-07-20
 
 ### Added

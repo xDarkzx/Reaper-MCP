@@ -135,6 +135,18 @@ async def _run_v2_pipeline(client, profile, plugin_profile, suite, clean):
     # 7. Apply sidechain specs via the existing setup_sidechain handler
     sidechains_applied = await _v2_apply_sidechains(client, profile, role_map)
 
+    # Tracks that matched no role got none of the above — no volume/EQ/comp,
+    # and any sidechain relying on them (e.g. kick->bass) silently never
+    # fires. Surface this instead of a quiet partial mix: a track named
+    # "Drums" (a single combined drum-machine track — very common) will
+    # never match "kick" (aliases are kick/bd/bass drum/kik only), so a
+    # trap mix can report success with 0 sidechains and no indication why.
+    unmatched = [
+        {"index": t["index"], "name": t.get("name", "")}
+        for t in live_tracks
+        if t["index"] not in role_map
+    ]
+
     return {
         "success": True,
         "path": "v2_catalog",
@@ -143,6 +155,7 @@ async def _run_v2_pipeline(client, profile, plugin_profile, suite, clean):
         "plugin_suite": suite.value,
         "tracks_matched": len(role_map),
         "role_map": {ti: role for ti, role in sorted(role_map.items())},
+        "unmatched_tracks": unmatched,
         "volume_staged": vol_count,
         "pan_applied": pan_count,
         "eq_applied": eq_count,

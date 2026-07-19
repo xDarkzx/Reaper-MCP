@@ -80,6 +80,33 @@ _NOTE_OFFSETS = {
 _CHORD_RE = re.compile(r"^\s*([A-Ga-g][#b]?)(.*?)\s*$")
 
 
+def _tile_pattern_lines(raw_lines: list[str], steps_per_bar: int, bar_count: int) -> list[str]:
+    """Expand each drum-pattern lane to steps_per_bar * bar_count characters.
+
+    A line exactly steps_per_bar long is repeated across all bar_count bars
+    (the common case: "play this 1-bar pattern for N bars"). Any other
+    length that doesn't already match the full expected length is an error
+    — silently only filling the first bar and leaving the rest empty is the
+    bug this guards against.
+    """
+    total_steps = steps_per_bar * bar_count
+    tiled = []
+    for raw in raw_lines:
+        line = raw.strip()
+        if len(line) == steps_per_bar and bar_count > 1:
+            line = line * bar_count
+        elif len(line) != total_steps:
+            raise ValueError(
+                f"Lane {line!r} has {len(line)} chars but steps_per_bar="
+                f"{steps_per_bar} x bar_count={bar_count} = {total_steps} "
+                f"expected (or exactly {steps_per_bar} to auto-repeat "
+                "across all bars). A short line does NOT repeat on its "
+                "own — pad with '.' or match one of those two lengths."
+            )
+        tiled.append(line)
+    return tiled
+
+
 def _parse_chord(name: str, base_octave: int) -> list[int] | None:
     """Return MIDI pitches for a chord like 'Cm7' or 'F#maj9'.
 
@@ -147,7 +174,12 @@ def register(mcp: FastMCP):
             h.h.h.h.h.h.h.h.
 
         Defaults: 16 steps per bar = 1/16-note grid. `channel=9` = GM drum channel.
-        Pass `item_index=-1` to auto-create a new MIDI item starting at `start_qn`.
+        Pass `item_index=-1` to auto-create a new MIDI item positioned in the
+        project at `start_qn` (e.g. bar 5 in 4/4 = start_qn=16.0). Building a
+        multi-section arrangement on one track? Call this once per section
+        with `item_index=-1` each time and increasing `start_qn` — each call
+        creates its own non-overlapping item at the right place, it does NOT
+        append to a previous item.
 
         Returns the item index and number of notes inserted.
         """
@@ -174,12 +206,17 @@ def register(mcp: FastMCP):
         if not raw_lines:
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "pattern is empty")
 
-        for raw in raw_lines:
-            line = raw.strip()
+        total_steps = steps_per_bar * bar_count
+        try:
+            tiled_lines = _tile_pattern_lines(raw_lines, steps_per_bar, bar_count)
+        except ValueError as e:
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, str(e))
+
+        for line in tiled_lines:
             had_hit = False
             step_in_lane = 0
             for ch in line:
-                if step_in_lane >= steps_per_bar * bar_count:
+                if step_in_lane >= total_steps:
                     break
                 if ch == "." or ch == " ":
                     step_in_lane += 1
@@ -189,9 +226,10 @@ def register(mcp: FastMCP):
                     unknown_chars.add(ch)
                     step_in_lane += 1
                     continue
-                # Note position is WITHIN the item — start_qn is the item's
-                # within-item offset, not an added note offset. Item position
-                # in the project is set separately when auto-creating.
+                # start_qn is the pattern's absolute position in QN (project
+                # time when auto-creating; must match the pre-created item's
+                # position if item_index was passed explicitly — see
+                # midi_insert_notes_batch, which uses absolute project time).
                 start = start_qn + step_in_lane * qn_per_step
                 notes.append({
                     "pitch": pitch,
@@ -215,17 +253,25 @@ def register(mcp: FastMCP):
         created_item = False
         if item_index < 0:
             total_qn = steps_per_bar * qn_per_step * bar_count
-            # Item length has to contain start_qn offset + the full pattern.
-            item_qn_length = start_qn + total_qn
-            length_sec = (item_qn_length * qn_to_sec) + 0.5
-            # Item always placed at project time 0 when auto-creating —
-            # start_qn is the within-item offset, not a project offset.
-            # Users wanting a specific project position should pre-create
-            # an item with `item_create_midi` and pass its index.
+            # No pad — any positive pad, even a tiny epsilon, guarantees
+            # overlap with a next section's item placed back-to-back at
+            # this section's end (confirmed: 0.5s pad overlapped by 0.5s,
+            # 0.05s pad by 0.05s, 0.001s pad by 0.001s — it's proportional,
+            # not a rounding artifact). Each drum note already ends 10% of a
+            # step early (see `gate` above), so the last note's tail is
+            # already inside total_qn with headroom to spare.
+            length_sec = total_qn * qn_to_sec
+            # Item is positioned in the project at start_qn — notes use
+            # absolute project time (see midi_insert_notes_batch), so the
+            # item boundary must start where the pattern actually starts.
+            # Otherwise a second call for a later section (different
+            # start_qn) would create an item that overlaps this one, since
+            # both would sit at project position 0.
+            position_sec = start_qn * qn_to_sec
             result = await client.execute(
                 "item_create_midi",
                 track_index=track_index,
-                position=0.0,
+                position=position_sec,
                 length=length_sec,
             )
             item_index = int(result.get("item_index", result.get("index", 0)))
@@ -276,7 +322,12 @@ def register(mcp: FastMCP):
         `base_octave=4` places C as MIDI 60 (middle C). Each chord occupies
         `chord_duration_qn` quarter notes (default 4 QN = one bar at 4/4).
 
-        Pass `item_index=-1` to auto-create a MIDI item sized to the progression.
+        Pass `item_index=-1` to auto-create a MIDI item positioned in the
+        project at `start_qn` (e.g. bar 5 in 4/4 = start_qn=16.0). Building a
+        multi-section arrangement on one track? Call this once per section
+        with `item_index=-1` each time and increasing `start_qn` — each call
+        creates its own non-overlapping item at the right place, it does NOT
+        append to a previous item.
 
         Returns the item index, number of chords placed, and any that failed to parse.
         """
@@ -330,15 +381,21 @@ def register(mcp: FastMCP):
         created_item = False
         if item_index < 0:
             total_qn = chord_duration_qn * len(chord_names)
-            # Item length has to contain start_qn offset + all chords.
-            item_qn_length = start_qn + total_qn
-            length_sec = (item_qn_length * qn_to_sec) + 0.5
-            # Item always placed at project time 0 when auto-creating —
-            # start_qn is the within-item offset, not a project offset.
+            # No pad — see create_drum_pattern's comment (any positive pad,
+            # even a tiny epsilon, guarantees overlap with a next section's
+            # item placed back-to-back at this one's end). The last chord's
+            # note-end and this item's end are computed from the same
+            # total_qn * qn_to_sec term, so they land together.
+            length_sec = total_qn * qn_to_sec
+            # Item is positioned in the project at start_qn — see the matching
+            # comment in create_drum_pattern for why (notes use absolute
+            # project time, so the item boundary must match or a later
+            # section's item would overlap this one at position 0).
+            position_sec = start_qn * qn_to_sec
             result = await client.execute(
                 "item_create_midi",
                 track_index=track_index,
-                position=0.0,
+                position=position_sec,
                 length=length_sec,
             )
             item_index = int(result.get("item_index", result.get("index", 0)))

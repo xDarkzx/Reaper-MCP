@@ -81,12 +81,19 @@ def register(mcp: FastMCP):
         return result
 
     @mcp.tool()
-    async def compose_arrangement(tracks: str, clear_existing: bool = False,
-                                  bpm: float = 120.0) -> dict:
+    async def compose_arrangement(tracks: str, clear_existing: bool = False) -> dict:
         """Batch-insert MIDI from shorthand or JSON — guarded for small edits only.
 
         Accepts either shorthand notation (e.g. `3|D3:2.5:65 E3:3.0:70|cc1:0-8:35-55`)
         or a JSON tracks array: `[{"track_index": N, "notes": [...], "ccs": [...]}]`.
+
+        All note/CC times (shorthand durations, JSON start/end) are RAW SECONDS,
+        not beats or quarter-notes, and are independent of the project's tempo —
+        there is no bpm parameter to set. If you need notes aligned to bars, get
+        the real tempo from `project_get_info` first and convert yourself
+        (seconds = beats * 60 / bpm). This differs from `create_drum_pattern` /
+        `create_chord_progression`, which take quarter-notes and convert using
+        the actual project BPM automatically — don't mix up the two conventions.
 
         Blocked at >2 tracks or >30 total notes to prevent accidental mass inserts —
         for larger writes, call this repeatedly in smaller chunks, or use the
@@ -95,7 +102,6 @@ def register(mcp: FastMCP):
         Args:
             tracks: JSON tracks array or shorthand string.
             clear_existing: True to wipe target tracks before inserting.
-            bpm: Project BPM (default 120).
         """
         log_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "reaper_mcp", "logs")
         try:

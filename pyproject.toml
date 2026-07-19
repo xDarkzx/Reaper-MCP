@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reaper-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP server for AI-driven music production in REAPER via file-based IPC with a Lua bridge"
 license = "Apache-2.0"
 authors = [

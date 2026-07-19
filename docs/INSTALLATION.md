@@ -44,13 +44,17 @@ When running directly, use `python -m reaper_mcp.main` anywhere this guide says 
 
 ReaperMCP talks to REAPER through a Lua script that runs inside REAPER and polls for commands via file-based IPC.
 
+**If you used the one-click installer** (`install.sh` / `install.bat`), this is already done — it drops a `__startup.lua` file into REAPER's `Scripts` resource folder, which REAPER auto-runs on every launch (this is a native REAPER feature — no plugin, no Action-list registration, just the exact filename). Open or restart REAPER and the MCP server is already running. Skip to [Step 3](#step-3-connect-your-ai-client).
+
+**Manual setup** (if you skipped the installer, or it couldn't find REAPER's resource folder because REAPER had never been run yet):
+
 1. Open **REAPER**
 2. Go to **Actions → Show action list**
 3. Click **Load ReaScript...**
 4. Navigate to `reaper_scripts/reaper_mcp_server.lua` and select it
 5. Click **Run**
 
-> **You only need to do this once.** REAPER remembers loaded scripts. The script must be running for MCP to work — if REAPER restarts, re-run the script from Actions.
+> This only loads it for the current REAPER session — if REAPER restarts, you'll need to re-run it from Actions each time. Re-run `install.sh`/`install.bat` once REAPER has been opened at least once to get the automatic version instead.
 
 > **Keep REAPER open** — the connection only works while REAPER is running with the Lua script active.
 
@@ -237,4 +241,6 @@ ReaperMCP needs VST instruments loaded on tracks before the AI can compose. See 
 | Works on Windows but not Linux | IPC path issue | Check `/tmp/reaper_mcp` exists and is writable. |
 | Everything looks running but every call times out on WSL | Python running inside WSL, REAPER running native Windows | **Don't run the Python `reaper-mcp` server from inside a WSL shell.** REAPER itself always runs as a native Windows app; WSL's `/tmp` is a separate filesystem from Windows' `%TEMP%` that REAPER's Lua side writes to — the two sides can never see each other's IPC files this way, no matter how correctly everything else is set up. Point your MCP client at native Windows Python (`python.exe`, not a WSL one) instead. The server itself now detects this and raises a specific error explaining it, instead of a generic timeout. |
 | "externally-managed-environment" error during install.sh | Modern Python + PEP 668 | Re-run `install.sh` — it auto-retries with `--user`. Or use `pipx install -e .`. |
+| Installer said auto-start was skipped | REAPER had never been run yet when you installed (no `Scripts` resource folder existed) | Open REAPER once, then re-run `install.sh`/`install.bat` — it'll detect the folder and set up `__startup.lua` this time. |
+| Auto-start configured but script still isn't running | Another script already occupies `__startup.lua` and something in it errors before reaching ReaperMCP's appended line | Check REAPER's script console for errors, or open `__startup.lua` in your REAPER `Scripts` folder and confirm the `dofile(...)` line pointing at `reaper_mcp_server.lua` is intact. |
 | `bash: ./install.sh: /bin/bash^M: bad interpreter` | Git on Windows converted line endings to CRLF | Run `bash install.sh` (don't execute directly), or `sed -i 's/\r$//' install.sh`. Pulling the latest repo with the new `.gitattributes` fixes this. |
