@@ -15,6 +15,46 @@ _TRACK_ENVELOPE_NAMES = {
     "Volume (Pre-FX)", "Pan (Pre-FX)", "Width (Pre-FX)",
 }
 
+_GAIN_ENVELOPES = {"Volume", "Volume (Pre-FX)", "Width", "Width (Pre-FX)"}
+_PAN_ENVELOPES = {"Pan", "Pan (Pre-FX)"}
+
+
+def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool, index: int):
+    """Catch the most common wrong-unit mistake before it reaches REAPER:
+    writing a raw dB number (which is negative, e.g. -6, -138) straight into
+    a gain envelope's `value`, which is linear gain and can never be
+    negative. A silent write here doesn't error — it just corrupts the
+    track (negative/zero gain reads as silence or worse), so this has to be
+    caught at the boundary, not discovered after the fact.
+    """
+    if is_fx_param:
+        if not 0.0 <= value <= 1.0:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"point[{index}]: FX param envelope value must be 0.0-1.0 normalized "
+                f"(same as fx_set_param), got {value!r}",
+            )
+    elif envelope_name in _GAIN_ENVELOPES:
+        if value < 0:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"point[{index}]: {envelope_name} envelope value must be linear gain "
+                f"(>= 0, 1.0 = unity/0dB) — got {value!r}, which looks like a raw dB "
+                f"value. Convert first: value = 10 ** (db / 20).",
+            )
+    elif envelope_name in _PAN_ENVELOPES:
+        if not -1.0 <= value <= 1.0:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"point[{index}]: Pan envelope value must be -1.0 to 1.0, got {value!r}",
+            )
+    elif envelope_name == "Mute":
+        if value not in (0.0, 1.0):
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"point[{index}]: Mute envelope value must be 0.0 or 1.0, got {value!r}",
+            )
+
 
 def register(mcp: FastMCP):
     from reaper_mcp.main import client
@@ -97,12 +137,14 @@ def register(mcp: FastMCP):
         if len(pts) > MAX_ENVELOPE_POINTS_PER_CALL:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE,
                                  f"too many points: {len(pts)} (max {MAX_ENVELOPE_POINTS_PER_CALL} per call)")
+        is_fx_param = fx_index >= 0 and param_index >= 0
         for i, pt in enumerate(pts):
             if not isinstance(pt, dict) or "time" not in pt or "value" not in pt:
                 raise ReaperMCPError(
                     ErrorCode.INVALID_PARAMETER,
                     f"point[{i}] must be object with 'time' and 'value' keys",
                 )
+            _validate_envelope_value(pt["value"], envelope_name, is_fx_param, i)
         payload = {
             "track_index": track_index,
             "envelope_name": envelope_name,

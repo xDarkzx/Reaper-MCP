@@ -92,6 +92,10 @@ All notable changes to ReaperMCP will be documented in this file.
   command. Exists to diagnose real slow requests from an actual
   long-running server process, which isolated fresh-process timing tests
   can't reproduce.
+- `00_core.md`: new Automation/Envelopes section — `envelope_clear_range`
+  (deletes points) vs. writing new points are not interchangeable ways to
+  "clear" automation, a worked dB→linear-gain conversion table, and a
+  reminder to verify writes with `envelope_get_points` rather than assume.
 
 ### Fixed
 
@@ -195,6 +199,22 @@ All notable changes to ReaperMCP will be documented in this file.
   `[r, g, b]` (0-255 whole numbers) shape instead of silently going black;
   verified directly against every malformed shape above, including the
   0-1 normalized-float case specifically.
+- **`envelope_add_points` accepted raw dB values (which are negative, e.g.
+  -6, -138) as a gain-envelope `value` with no validation, silently writing
+  invalid/nonsensical automation instead of erroring.** Volume/Width track
+  envelope values are linear gain (1.0 = unity/0dB) and can never be
+  negative — reproduced live: asking the AI to reset a track's volume
+  automation resulted in points literally valued -138, corrupting the
+  track instead of resetting it. Root cause was two-fold: nothing rejected
+  an invalid value at the tool boundary, and `00_core.md` never documented
+  the dB→linear-gain conversion or that clearing automation means
+  `envelope_clear_range` (deletes points), not writing new ones over the
+  old ones. Fixed both — `envelope_add_points` now rejects negative gain
+  values, out-of-range Pan (outside -1..1), non-0/1 Mute, and out-of-range
+  FX-param values with an error naming the correct conversion; `0.0` itself
+  is still accepted since literal silence is a legitimate value, only
+  invalid/negative values are rejected. Verified directly against the
+  exact -138 case plus every other invalid shape.
 
 ## [0.4.0] - 2026-07-20
 
