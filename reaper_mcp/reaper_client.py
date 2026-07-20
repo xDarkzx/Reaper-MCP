@@ -16,6 +16,30 @@ from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 # Heartbeat: lock file must be updated within this many seconds
 _HEARTBEAT_STALE_SECONDS = 60
 
+# Diagnostic-only: any command taking longer than this gets a stage-by-stage
+# timing breakdown appended to slow_commands.log, so a real slow request from
+# a real long-running server can be diagnosed after the fact instead of
+# guessed at — isolated fresh-process timing tests can't reproduce whatever
+# is different about an already-running, in-use server.
+_SLOW_THRESHOLD_SECONDS = 1.0
+_SLOW_LOG_FILE = os.path.join(Connection.IPC_DIR, "slow_commands.log")
+
+
+def _log_slow(command: str, stages: dict) -> None:
+    if stages.get("total", 0) < _SLOW_THRESHOLD_SECONDS:
+        return
+    try:
+        os.makedirs(Connection.IPC_DIR, exist_ok=True)
+        parts = " ".join(
+            f"{k}={v}" if k == "poll_iters" else f"{k}={v:.2f}s"
+            for k, v in stages.items()
+        )
+        with open(_SLOW_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} pid={os.getpid()} "
+                    f"cmd={command} {parts}\n")
+    except OSError:
+        pass
+
 
 @contextlib.contextmanager
 def _ipc_mutex(timeout: float):
@@ -143,18 +167,33 @@ class ReaperClient:
                 pass
 
     def _send_command(self, command: str, timeout: float, **params) -> dict:
+        t_start = time.monotonic()
         self._check_server()
+        t_checked = time.monotonic()
         with _ipc_mutex(timeout):
-            return self._send_command_locked(command, timeout, **params)
+            t_locked = time.monotonic()
+            result, inner_stages = self._send_command_locked(command, timeout, **params)
+            t_done = time.monotonic()
+        stages = {
+            "check_server": t_checked - t_start,
+            "mutex_wait": t_locked - t_checked,
+            **inner_stages,
+            "total": t_done - t_start,
+        }
+        _log_slow(command, stages)
+        return result
 
-    def _send_command_locked(self, command: str, timeout: float, **params) -> dict:
+    def _send_command_locked(self, command: str, timeout: float, **params) -> tuple[dict, dict]:
+        t0 = time.monotonic()
         self._cleanup_files()
+        t1 = time.monotonic()
 
         # Write command atomically
         msg = json.dumps({"command": command, "params": params})
         with open(Connection.COMMAND_TMP, "w", encoding="utf-8") as f:
             f.write(msg)
         os.replace(Connection.COMMAND_TMP, Connection.COMMAND_FILE)
+        t2 = time.monotonic()
 
         # Poll for response. On parse failure we require the response file's
         # mtime to CHANGE before retrying — otherwise we're re-reading the
@@ -183,7 +222,12 @@ class ReaperClient:
                                 os.remove(Connection.RESPONSE_FILE)
                             except OSError:
                                 pass
-                            return result
+                            return result, {
+                                "cleanup": t1 - t0,
+                                "write": t2 - t1,
+                                "poll": time.monotonic() - t2,
+                                "poll_iters": poll_count,
+                            }
                         except (json.JSONDecodeError, UnicodeDecodeError) as dec_err:
                             parse_failures += 1
                             last_parse_fail_mtime = current_mtime

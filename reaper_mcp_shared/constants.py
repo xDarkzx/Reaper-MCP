@@ -22,6 +22,15 @@ class Connection:
     # clients) can coexist safely; the second just waits its turn instead of
     # racing on the same command.json/response.json.
     IPC_MUTEX_FILE = os.path.join(IPC_DIR, "ipc.mutex")
+    # One tiny marker file per parent client PID, holding the PID of the
+    # most-recently-started server for that client. Written on startup by
+    # every server; watched by every server (including itself). If a server
+    # ever reads back a PID here that isn't its own, it means a newer server
+    # for the same client has taken over — e.g. the client reconnected and
+    # spawned a replacement without stopping this one — and it retires
+    # itself. Nothing ever reads this file to kill another process; each
+    # server only ever acts on what it reads about itself.
+    GENERATION_DIR = os.path.join(IPC_DIR, "generations")
 
 
 class Timeouts:

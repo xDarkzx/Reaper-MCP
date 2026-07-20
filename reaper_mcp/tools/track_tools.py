@@ -8,12 +8,22 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def track_get_all() -> dict:
-        """Get all tracks with properties (name, volume, pan, mute, solo, FX, items, routing)."""
+        """Get all tracks with properties (name, volume, pan, mute, solo, FX, items, routing).
+
+        Each track includes `sample_filenames` — the distinct audio file
+        names actually dragged/imported onto that track (Splice, sample
+        packs, etc.), not the track's own display name. Vendors commonly
+        embed BPM/key in the filename itself, e.g. "Karra_Vocal_Loop_120bpm_Cmin.wav".
+        Capped at 20 distinct names per track; empty if the track has no
+        audio items.
+        """
         return await client.execute("track_get_all")
 
     @mcp.tool()
     async def track_get_info(track_index: int) -> dict:
         """Get detailed info for one track.
+
+        Includes `sample_filenames` — see `track_get_all` for what this is.
 
         Args:
             track_index: 0-based track index.

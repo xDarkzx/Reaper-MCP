@@ -11,6 +11,34 @@ from reaper_mcp.safety import ensure_backup
 logger = logging.getLogger(__name__)
 
 
+def _validate_color_array(color, context: str):
+    """Validate the `[r, g, b]` shape used by configure_tracks/add_markers_batch
+    entries — same 0-255 range check as marker_tools._validate_color, but for
+    the positional-array shape rather than separate color_r/g/b args. Raises
+    a clear error instead of letting a malformed value (an {r,g,b} object, a
+    hex string, out-of-range floats) reach the Lua bridge, where it used to
+    silently resolve to black instead of erroring.
+    """
+    if not isinstance(color, list) or len(color) != 3:
+        raise ReaperMCPError(
+            ErrorCode.INVALID_PARAMETER,
+            f"{context}: color must be a [r, g, b] array of exactly 3 numbers (0-255 each)",
+        )
+    for val in color:
+        # Whole numbers only — real RGB components are always integers 0-255.
+        # This also catches the most common wrong guess: 0.0-1.0 normalized
+        # floats (matching the convention several other params in this API
+        # use), which would otherwise pass a bare range check and silently
+        # produce near-black instead of erroring.
+        is_whole_number = isinstance(val, (int, float)) and not isinstance(val, bool) and float(val).is_integer()
+        if not is_whole_number or not 0 <= val <= 255:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"{context}: color must be a [r, g, b] array of exactly 3 whole numbers "
+                f"(0-255 each) — got {val!r}",
+            )
+
+
 def _load_state_safe(state_path: str) -> set[int]:
     """Load composed_tracks.json and return the set of composed track indices.
 
@@ -126,7 +154,9 @@ def register(mcp: FastMCP):
         """Batch set volume_db, pan, color, mute, solo, name on multiple tracks.
 
         Args:
-            tracks: JSON array. Each: {"track_index":0, "volume_db":-3.0, "pan":-0.5, ...}. Only track_index required.
+            tracks: JSON array. Each: {"track_index":0, "volume_db":-3.0, "pan":-0.5,
+                    "color":[200,90,60], ...}. Only track_index required.
+                    color is [r, g, b], each 0-255 (not a {"r":..} object, not a hex string).
         """
         try:
             tracks_data = json.loads(tracks)
@@ -147,6 +177,8 @@ def register(mcp: FastMCP):
                 raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i} missing track_index")
             if not isinstance(entry["track_index"], int) or entry["track_index"] < 0:
                 raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, f"Entry {i}: track_index must be >= 0")
+            if "color" in entry and entry["color"] is not None:
+                _validate_color_array(entry["color"], f"Entry {i}")
 
         return await client.execute("configure_tracks", tracks=tracks)
 
@@ -178,7 +210,9 @@ def register(mcp: FastMCP):
         """Batch add markers/regions.
 
         Args:
-            markers: JSON array. Markers: {"position":0,"name":"Intro"}. Regions: {"start":0,"end":8,"name":"V1","is_region":true}. Color optional.
+            markers: JSON array. Markers: {"position":0,"name":"Intro"}. Regions:
+                     {"start":0,"end":8,"name":"V1","is_region":true}.
+                     color optional: [r, g, b], each 0-255.
         """
         try:
             markers_data = json.loads(markers)
@@ -190,6 +224,10 @@ def register(mcp: FastMCP):
 
         if len(markers_data) > 200:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "Too many markers (max 200)")
+
+        for i, entry in enumerate(markers_data):
+            if "color" in entry and entry["color"] is not None:
+                _validate_color_array(entry["color"], f"Entry {i}")
 
         return await client.execute("add_markers_batch", markers=markers)
 
@@ -347,8 +385,9 @@ def register(mcp: FastMCP):
         if bus_color:
             try:
                 color_data = json.loads(bus_color)
-                params["bus_color"] = bus_color
             except (json.JSONDecodeError, TypeError):
-                pass
+                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "Invalid bus_color JSON")
+            _validate_color_array(color_data, "bus_color")
+            params["bus_color"] = bus_color
 
         return await client.execute("setup_effect_bus", **params)

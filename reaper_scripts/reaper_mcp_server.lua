@@ -390,6 +390,43 @@ local function clamp_color(val)
   return clamp(tonumber(val) or 0, 0, 255)
 end
 
+-- Build a REAPER "custom color" native int (with the 0x1000000 flag) from
+-- r,g,b, clamping each to 0-255.
+local function native_color(r, g, b)
+  r, g, b = clamp_color(r), clamp_color(g), clamp_color(b)
+  return reaper.ColorToNative(r, g, b) | 0x1000000
+end
+
+-- Same, but (0,0,0) means "no color" (returns REAPER's own 0 sentinel)
+-- instead of actual black — for call sites where color_r/g/b default to 0
+-- when the caller didn't pass a color at all, so there's no way to tell
+-- "wants black" from "didn't ask for a color" apart from this convention.
+local function native_color_or_none(r, g, b)
+  r, g, b = clamp_color(r), clamp_color(g), clamp_color(b)
+  if r == 0 and g == 0 and b == 0 then return 0 end
+  return reaper.ColorToNative(r, g, b) | 0x1000000
+end
+
+-- Build a native color from a [r,g,b] array (or a JSON string of one) —
+-- the shape configure_tracks/add_markers_batch/setup_effect_bus's bus_color
+-- all accept. Validates the shape instead of silently defaulting missing/
+-- malformed components to 0, which used to mean any wrong shape (an
+-- {r=,g=,b=} object, a hex string, out-of-range floats) silently painted
+-- everything black with no error. Returns (native_color, nil) on success,
+-- (nil, error_message) on a malformed array.
+local function native_color_from_array(arr)
+  if type(arr) == "string" then arr = json_decode(arr) end
+  if type(arr) ~= "table" or #arr ~= 3 then
+    return nil, "color must be a [r,g,b] array of exactly 3 numbers (0-255 each)"
+  end
+  for _, v in ipairs(arr) do
+    if type(v) ~= "number" then
+      return nil, "color must be a [r,g,b] array of exactly 3 numbers (0-255 each)"
+    end
+  end
+  return native_color(arr[1], arr[2], arr[3]), nil
+end
+
 -- ============================================================
 -- State builders (feedback loops)
 -- ============================================================
@@ -424,6 +461,59 @@ local function build_transport_state()
   }
 end
 
+-- Resolve a take's actual source media file, walking up through SECTION /
+-- reverse wrapper sources to the real root (those wrap the true file with
+-- their own source object, so a direct source-filename call on an unwrapped
+-- take returns nothing useful). Returns (root_source, filename) — filename
+-- is "" if the take has no source (e.g. empty/offline item).
+local function resolve_source(take)
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return nil, "" end
+  local root = src
+  for _ = 1, 8 do
+    local parent = reaper.GetMediaSourceParent(root)
+    if not parent then break end
+    root = parent
+  end
+  local filename = reaper.GetMediaSourceFileName(root, "")
+  if type(filename) ~= "string" or filename == "" then
+    local _, fn2 = reaper.GetMediaSourceFileName(root, "")
+    filename = fn2 or ""
+  end
+  return root, (filename or "")
+end
+
+local function basename(path)
+  if path == "" then return "" end
+  return path:match("([^\\/]+)$") or path
+end
+
+-- Distinct source filenames (basename only) across every audio item on a
+-- track — so a track carrying a dragged-in sample (Splice, etc.) shows what
+-- was actually dropped on it directly from track-level info, no separate
+-- per-item lookup needed. Capped at 20 to keep track_get_all bounded for a
+-- track with a huge number of chopped/spliced items.
+local function track_sample_filenames(tr)
+  local seen, names = {}, {}
+  local n = reaper.CountTrackMediaItems(tr)
+  for i = 0, n - 1 do
+    if #names >= 20 then break end
+    local it = reaper.GetTrackMediaItem(tr, i)
+    local take = it and reaper.GetActiveTake(it)
+    if take and not reaper.TakeIsMIDI(take) then
+      local _, filename = resolve_source(take)
+      if filename ~= "" then
+        local b = basename(filename)
+        if not seen[b] then
+          seen[b] = true
+          names[#names+1] = b
+        end
+      end
+    end
+  end
+  return names
+end
+
 local function build_track_info(tr, idx)
   local _, name = reaper.GetTrackName(tr)
   local vol = reaper.GetMediaTrackInfo_Value(tr, "D_VOL")
@@ -443,6 +533,10 @@ local function build_track_info(tr, idx)
     selected = reaper.IsTrackSelected(tr),
     fx_count = reaper.TrackFX_GetCount(tr),
     item_count = reaper.CountTrackMediaItems(tr),
+    -- Sample-pack vendors (Splice, etc.) commonly embed BPM/key in the
+    -- filename itself ("Karra_Vocal_Loop_120bpm_Cmin.wav") — this is the
+    -- actual dragged-in audio file names, not the track's own display name.
+    sample_filenames = track_sample_filenames(tr),
     send_count = reaper.GetTrackNumSends(tr, 0),
     receive_count = reaper.GetTrackNumSends(tr, -1),
     folder_depth = reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH"),
@@ -462,11 +556,17 @@ local function build_item_info(item, idx)
   local is_midi = false
   local pitch = 0.0
   local playrate = 1.0
+  local source_file = ""
   if take then
     _, name = reaper.GetTakeName(take)
     is_midi = reaper.TakeIsMIDI(take)
     pitch = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH")
     playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+    -- Audio only — MIDI takes have no media source file to name.
+    if not is_midi then
+      local _, filename = resolve_source(take)
+      source_file = filename
+    end
   end
   local tr = reaper.GetMediaItemTrack(item)
   local tr_num = reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
@@ -479,6 +579,12 @@ local function build_item_info(item, idx)
     volume = vol,
     volume_db = db_from_vol(vol),
     name = name,
+    -- Full source file path and just the filename — sample-pack vendors
+    -- (Splice, etc.) commonly embed BPM/key in the filename itself
+    -- ("Karra_Vocal_Loop_120bpm_Cmin.wav"), which the take's editable
+    -- display `name` above does NOT reliably preserve.
+    source_file = source_file,
+    source_filename = basename(source_file),
     selected = reaper.IsMediaItemSelected(item),
     mute = reaper.GetMediaItemInfo_Value(item, "B_MUTE") == 1,
     is_midi = is_midi,
@@ -778,11 +884,7 @@ end
 function track.track_set_color(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local r = clamp_color(p.r)
-  local g = clamp_color(p.g)
-  local b = clamp_color(p.b)
-  local color = reaper.ColorToNative(r, g, b) | 0x1000000
-  reaper.SetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR", color)
+  reaper.SetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR", native_color(p.r, p.g, p.b))
   reaper.UpdateArrange()
   return build_track_info(tr, idx)
 end
@@ -1634,22 +1736,9 @@ function item.item_get_source_info(p)
   local take = reaper.GetActiveTake(it)
   if not take then return nil, "Item has no active take" end
 
-  local src = reaper.GetMediaItemTake_Source(take)
-  if not src then return nil, "Take has no source" end
+  local root, filename = resolve_source(take)
+  if not root then return nil, "Take has no source" end
 
-  -- SECTION / reverse sources wrap the real file — walk up to the root.
-  local root = src
-  for _ = 1, 8 do
-    local parent = reaper.GetMediaSourceParent(root)
-    if not parent then break end
-    root = parent
-  end
-
-  local filename = reaper.GetMediaSourceFileName(root, "")
-  if type(filename) ~= "string" or filename == "" then
-    local _, fn2 = reaper.GetMediaSourceFileName(root, "")
-    filename = fn2 or ""
-  end
   local src_length, is_qn = reaper.GetMediaSourceLength(root)
   if is_qn then
     local bpm = reaper.Master_GetTempo()
@@ -1842,26 +1931,16 @@ end
 
 function marker.marker_add(p)
   if p.position == nil then return nil, "Missing parameter: position" end
-  local color = 0
-  local r = clamp_color(p.color_r)
-  local g = clamp_color(p.color_g)
-  local b = clamp_color(p.color_b)
-  if r > 0 or g > 0 or b > 0 then
-    color = reaper.ColorToNative(r, g, b) | 0x1000000
-  end
+  local r, g, b = clamp_color(p.color_r), clamp_color(p.color_g), clamp_color(p.color_b)
+  local color = native_color_or_none(r, g, b)
   local idx = reaper.AddProjectMarker2(0, false, p.position, 0, p.name or "", -1, color)
   return {marker_number = idx, position = p.position, name = p.name or "", color = {r = r, g = g, b = b}, total_markers = reaper.CountProjectMarkers(0)}
 end
 
 function marker.marker_add_region(p)
   if not p.start or not p["end"] then return nil, "Missing parameter: start/end" end
-  local color = 0
-  local r = clamp_color(p.color_r)
-  local g = clamp_color(p.color_g)
-  local b = clamp_color(p.color_b)
-  if r > 0 or g > 0 or b > 0 then
-    color = reaper.ColorToNative(r, g, b) | 0x1000000
-  end
+  local r, g, b = clamp_color(p.color_r), clamp_color(p.color_g), clamp_color(p.color_b)
+  local color = native_color_or_none(r, g, b)
   local idx = reaper.AddProjectMarker2(0, true, p.start, p["end"], p.name or "", -1, color)
   return {region_number = idx, start = p.start, ["end"] = p["end"], name = p.name or "", color = {r = r, g = g, b = b}, total_markers = reaper.CountProjectMarkers(0)}
 end
@@ -2948,10 +3027,11 @@ function compose.configure_tracks(p)
       reaper.SetMediaTrackInfo_Value(tr, "I_SOLO", entry.solo and 1 or 0)
     end
     if entry.color ~= nil then
-      local r = clamp_color(entry.color[1] or 0)
-      local g = clamp_color(entry.color[2] or 0)
-      local b = clamp_color(entry.color[3] or 0)
-      local c = reaper.ColorToNative(r, g, b) | 0x1000000
+      local c, err = native_color_from_array(entry.color)
+      if not c then
+        reaper.Undo_EndBlock("configure_tracks", -1)
+        return nil, "Track " .. ti .. ": " .. err
+      end
       reaper.SetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR", c)
     end
 
@@ -3012,10 +3092,12 @@ function compose.add_markers_batch(p)
     local name = entry.name or ""
     local color = 0
     if entry.color then
-      local r = clamp_color(entry.color[1] or 0)
-      local g = clamp_color(entry.color[2] or 0)
-      local b = clamp_color(entry.color[3] or 0)
-      color = reaper.ColorToNative(r, g, b) | 0x1000000
+      local c, err = native_color_from_array(entry.color)
+      if not c then
+        reaper.Undo_EndBlock("add_markers_batch", -1)
+        return nil, err
+      end
+      color = c
     end
 
     if is_region then
@@ -3199,15 +3281,12 @@ function compose.setup_effect_bus(p)
 
   -- Set bus color if provided
   if p.bus_color then
-    local bc = p.bus_color
-    if type(bc) == "string" then bc = json_decode(bc) end
-    if bc then
-      local r = clamp_color(bc[1] or 0)
-      local g = clamp_color(bc[2] or 0)
-      local b = clamp_color(bc[3] or 0)
-      local c = reaper.ColorToNative(r, g, b) | 0x1000000
-      reaper.SetMediaTrackInfo_Value(bus_tr, "I_CUSTOMCOLOR", c)
+    local c, err = native_color_from_array(p.bus_color)
+    if not c then
+      reaper.Undo_EndBlock("setup_effect_bus", -1)
+      return nil, "bus_color: " .. err
     end
+    reaper.SetMediaTrackInfo_Value(bus_tr, "I_CUSTOMCOLOR", c)
   end
 
   -- Add FX plugins to the bus

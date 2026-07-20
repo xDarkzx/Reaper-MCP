@@ -58,6 +58,40 @@ All notable changes to ReaperMCP will be documented in this file.
 - `tests/test_patterns_tools.py` and `tests/test_safety.py` — 16 new tests
   covering the item-placement/pattern-tiling fixes and the auto-backup
   decision logic below. Full suite: 91 passing (was 75).
+- **Real cross-process mutex around the REAPER IPC bridge.** Two reaper-mcp
+  server processes (e.g. Claude Desktop and a separate terminal session
+  both driving the same REAPER instance) previously had no protection
+  against racing on the shared `command.json`/`response.json` files — one
+  server's response could get read by the other's request. `_ipc_mutex` in
+  `reaper_mcp/reaper_client.py` now holds a real OS-level lock
+  (`msvcrt.locking` on Windows) for the duration of each full command
+  round-trip, so a second process just waits its turn instead of racing or
+  silently reading the wrong response.
+- **Superseded-server self-retirement.** When a client reconnects and
+  spawns a replacement server without stopping the old one, the old process
+  now notices and exits on its own. Each server writes its own PID to a
+  small per-parent-PID marker file on startup (`GENERATION_DIR`); every
+  server (including itself) watches that file, and if it ever reads back a
+  PID that isn't its own, it retires — self-directed only, no process ever
+  terminates another one. Verified with a direct claim/read/re-claim test
+  of the marker file, not just read through.
+- `item_get_all`/`item_get_info` now return `source_file` (full path) and
+  `source_filename` (basename) for audio items, and `track_get_all`/
+  `track_get_info` now return `sample_filenames` (distinct audio filenames
+  across a track's items, capped at 20). Previously the only exposed name
+  was the take's editable display name, which sample-pack vendors
+  (Splice, etc.) don't reliably preserve — vendors commonly embed BPM/key
+  in the actual filename itself ("Karra_Vocal_Loop_120bpm_Cmin.wav"), which
+  was invisible without a filesystem-level check outside the AI's reach.
+  The underlying source-resolution logic already existed internally for
+  `chop_pipeline`; this surfaces it through the general track/item
+  inspection tools instead of leaving it chop-pipeline-only.
+- `reaper_client.py`: diagnostic stage-by-stage timing log
+  (`%TEMP%/reaper_mcp/slow_commands.log`) for any command taking over 1s —
+  check_server / mutex_wait / cleanup / write / poll / poll_iters, per
+  command. Exists to diagnose real slow requests from an actual
+  long-running server process, which isolated fresh-process timing tests
+  can't reproduce.
 
 ### Fixed
 
@@ -99,6 +133,68 @@ All notable changes to ReaperMCP will be documented in this file.
   the live project BPM). Removed the parameter; docstring now states the
   seconds-vs-quarter-notes split explicitly so the two conventions aren't
   mixed up.
+- **Server self-terminated on an ambiguous parent-liveness check.** The
+  parent-watchdog thread (`_watch_parent`/`_parent_alive` in
+  `reaper_mcp/main.py`) treated a failed `OpenProcess()` handle as proof
+  the parent had exited — but that call can fail for reasons unrelated to
+  the parent's actual state, e.g. the parent running in a different
+  Windows security context (an MSIX/AppContainer sandbox, which is how
+  Claude Desktop's Windows Store build runs its children, vs. an
+  unsandboxed terminal session). That false "dead" reading killed a
+  perfectly healthy server within ~3s of startup. Now fails open — an
+  inconclusive check means "assume alive," not "assume dead" — and
+  requires 3 consecutive confirmed-dead readings (not one) before actually
+  exiting. Verified directly against a nonexistent PID, a live PID, and a
+  genuinely-exited PID; all three now return the correct result.
+- **The kill-based single-instance guard was removed entirely** —
+  `_claim_single_instance()` tried to prevent IPC cross-talk by
+  `TerminateProcess`-ing whatever PID it found in a shared claim file on
+  every server startup. Destructive, and unreliable across the same
+  security-context boundary noted above. The actual shared resource is now
+  protected properly (see the cross-process mutex above) instead of
+  fighting over who gets to exist.
+- **Server crashed on effectively every
+  connection, surfacing to the client as "Server disconnected" with no
+  further detail.** Python's default stdio encoding on Windows follows the
+  OS's legacy ANSI codepage (`cp1252` on the machine this was found on),
+  not UTF-8, unless the system has opted into "Use Unicode UTF-8 for
+  worldwide language support" (off by default) or the process explicitly
+  requests it. MCP's stdio transport requires UTF-8 JSON-RPC framing, and
+  several tool docstrings use non-ASCII characters (em dashes, arrows like
+  "kick→bass" in the sidechain tools). `tools/list` — one of the first
+  calls any client makes on connect — sends every registered tool's
+  description in one response; the instant that response tried to write a
+  character outside `cp1252`'s range to stdout, it raised an unhandled
+  `UnicodeEncodeError` deep in the transport layer and killed the process.
+  Reproduced directly: a `tools/list` call against the unpatched server
+  crashed it every time; the same call against the patched server returned
+  all 164 tools successfully and the process stayed alive. Fix:
+  `sys.stdout`/`stdin`/`stderr` are explicitly reconfigured to UTF-8 at the
+  very top of `reaper_mcp/main.py`, before anything else touches stdio, so
+  behavior no longer depends on the parent process's or OS's codepage.
+  Marked unverified pending a live Claude Desktop retest — this note gets
+  the caveat removed once confirmed.
+- **Batch coloring silently painted everything black instead of erroring
+  on a malformed `color`.** The same buggy pattern — `entry.color[1]`
+  indexing with no shape validation, defaulting any missing/wrong-typed
+  component to 0 — was duplicated across 5 places in the Lua bridge
+  (`track_set_color`, `marker_add`, `marker_add_region`,
+  `configure_tracks`, `add_markers_batch`, `setup_effect_bus`'s
+  `bus_color`). Neither side documented or validated the `[r,g,b]` array
+  shape, so a caller passing an `{"r":..,"g":..,"b":..}` object, a hex
+  string, or 0.0-1.0 normalized floats (a reasonable guess, since other
+  params in this API use that scale) got every track quietly set to black
+  with no error. Separately, `setup_effect_bus`'s Python-side `bus_color`
+  handling had its own bug: a malformed value was silently dropped
+  (`except: pass`) rather than erroring or applying. Consolidated into
+  shared, validating helpers on both sides — Lua:
+  `native_color`/`native_color_or_none`/`native_color_from_array`; Python:
+  `_validate_color_array` in `compose_edit_tools.py` (paired with the
+  pre-existing `marker_tools._validate_color` for the separate-scalar-args
+  tools). Malformed input now raises a clear error naming the expected
+  `[r, g, b]` (0-255 whole numbers) shape instead of silently going black;
+  verified directly against every malformed shape above, including the
+  0-1 normalized-float case specifically.
 
 ## [0.4.0] - 2026-07-20
 

@@ -52,6 +52,13 @@ def register(mcp: FastMCP):
     async def item_get_all(track_index: int = -1, max_results: int = 200) -> dict:
         """Get all media items. Filter by track or -1 for all.
 
+        Each item includes `source_file` (full path) and `source_filename`
+        (basename only) for audio items — the actual dragged-in media file
+        name, e.g. from a Splice/sample-pack import. Sample vendors commonly
+        embed BPM/key in the filename itself ("Karra_Vocal_Loop_120bpm_Cmin.wav"),
+        which the take's editable `name` field does not reliably preserve.
+        Both are "" for MIDI items or items with no source.
+
         Args:
             track_index: Track filter (-1=all).
             max_results: Max items to return (default 200, hard ceiling 2000).
@@ -75,6 +82,9 @@ def register(mcp: FastMCP):
     @mcp.tool()
     async def item_get_info(item_index: int) -> dict:
         """Get detailed info for one item.
+
+        Includes `source_file`/`source_filename` for audio items — see
+        `item_get_all` for what these are and why they matter.
 
         Args:
             item_index: Item index.
