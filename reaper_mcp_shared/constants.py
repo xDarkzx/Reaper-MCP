@@ -15,6 +15,13 @@ class Connection:
     COMMAND_TMP = os.path.join(IPC_DIR, "command.tmp")
     RESPONSE_TMP = os.path.join(IPC_DIR, "response.tmp")
     LOCK_FILE = os.path.join(IPC_DIR, "server.lock")
+    # Cross-process mutex guarding one full command round-trip (write command
+    # -> poll -> read response) against another reaper-mcp server process
+    # doing the same at the same time. Real OS-level lock, not a kill-based
+    # singleton — multiple server processes (e.g. two separate Claude
+    # clients) can coexist safely; the second just waits its turn instead of
+    # racing on the same command.json/response.json.
+    IPC_MUTEX_FILE = os.path.join(IPC_DIR, "ipc.mutex")
 
 
 class Timeouts:

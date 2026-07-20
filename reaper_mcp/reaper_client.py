@@ -1,14 +1,73 @@
 import asyncio
+import contextlib
 import json
 import os
 import sys
 import time
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from reaper_mcp_shared.constants import Connection, Timeouts
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 # Heartbeat: lock file must be updated within this many seconds
 _HEARTBEAT_STALE_SECONDS = 60
+
+
+@contextlib.contextmanager
+def _ipc_mutex(timeout: float):
+    """Real OS-level mutual exclusion for one full command round-trip.
+
+    This is what actually prevents cross-talk when more than one reaper-mcp
+    server process is alive at once (e.g. two separate Claude clients each
+    running their own server against the same shared IPC files) — a real
+    lock means the second process just waits its turn instead of racing on
+    command.json/response.json, or being killed outright. Non-blocking
+    polling loop (not a blocking OS wait) so we can respect the caller's
+    timeout budget and raise a normal ReaperMCPError instead of hanging.
+    """
+    os.makedirs(Connection.IPC_DIR, exist_ok=True)
+    fd = open(Connection.IPC_MUTEX_FILE, "a+b")
+    try:
+        fd.seek(0, os.SEEK_END)
+        if fd.tell() == 0:
+            fd.write(b"\0")
+            fd.flush()
+
+        deadline = time.monotonic() + timeout
+        while True:
+            fd.seek(0)
+            try:
+                if sys.platform == "win32":
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise ReaperMCPError(
+                        ErrorCode.COMMAND_TIMEOUT,
+                        "Timed out waiting for another in-flight REAPER command "
+                        "(from this or another reaper-mcp server) to finish.",
+                    )
+                time.sleep(Timeouts.POLL_INTERVAL)
+
+        try:
+            yield
+        finally:
+            fd.seek(0)
+            try:
+                if sys.platform == "win32":
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        fd.close()
 
 
 def _is_wsl() -> bool:
@@ -85,6 +144,10 @@ class ReaperClient:
 
     def _send_command(self, command: str, timeout: float, **params) -> dict:
         self._check_server()
+        with _ipc_mutex(timeout):
+            return self._send_command_locked(command, timeout, **params)
+
+    def _send_command_locked(self, command: str, timeout: float, **params) -> dict:
         self._cleanup_files()
 
         # Write command atomically
