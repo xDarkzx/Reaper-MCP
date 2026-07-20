@@ -6,6 +6,15 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Added
 
+- **LM Studio support.** `install.sh`/`install.bat` now also configure LM
+  Studio's `mcp.json` (`~/.lmstudio/mcp.json` on macOS/Linux,
+  `%USERPROFILE%\.lmstudio\mcp.json` on Windows) — same `{"mcpServers": {...}}`
+  shape as Claude Desktop's config, just a different file. Documented in
+  `docs/INSTALLATION.md` and added to the README's supported-clients list.
+- README: git-availability check before the clone instructions — a fresh
+  Windows install doesn't ship with git. Added a `winget install Git.Git`
+  step (with a direct git-scm.com fallback if winget itself isn't present)
+  ahead of `git clone`, and a one-line check/install note for macOS/Linux.
 - **Automatic pre-action backup for destructive operations.** `wipe_all_midi`,
   `track_delete`, `item_delete`, and `engine_mix`/`engine_master` with
   `clean=True` (which removes existing FX before applying new ones) now

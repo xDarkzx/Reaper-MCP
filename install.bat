@@ -9,7 +9,7 @@ echo  ============================================
 echo.
 
 :: ── Check Python ──────────────────────────────────────────
-echo [1/5] Checking Python...
+echo [1/6] Checking Python...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo.
@@ -83,7 +83,7 @@ if defined VIRTUAL_ENV (
 
 :: Check if pip is available
 echo.
-echo [2/5] Installing reaper-mcp...
+echo [2/6] Installing reaper-mcp...
 python -m pip --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo   pip not found, installing pip...
@@ -117,7 +117,7 @@ echo   reaper-mcp installed successfully!
 :: Scripts resource folder, on every launch, with no Action-list
 :: registration needed. Removes the "load the Lua script every time" step.
 echo.
-echo [3/5] Setting up REAPER auto-start...
+echo [3/6] Setting up REAPER auto-start...
 
 set "REAPER_SCRIPTS_DIR=%APPDATA%\REAPER\Scripts"
 set "STARTUP_SCRIPT=%REAPER_SCRIPTS_DIR%\__startup.lua"
@@ -163,7 +163,7 @@ if exist "%STARTUP_SCRIPT%" (
 
 :: ── Configure Claude Desktop ──────────────────────────────
 echo.
-echo [4/5] Configuring Claude Desktop...
+echo [4/6] Configuring Claude Desktop...
 
 set "CONFIG_DIR=%APPDATA%\Claude"
 set "CONFIG_FILE=%CONFIG_DIR%\claude_desktop_config.json"
@@ -218,9 +218,63 @@ echo   %CONFIG_FILE%
 
 :skip_config
 
+:: ── Configure LM Studio ────────────────────────────────────
+:: LM Studio's mcp.json uses the exact same {"mcpServers": {...}} shape as
+:: Claude Desktop's config, just a different file location.
+echo.
+echo [5/6] Configuring LM Studio...
+
+set "LMSTUDIO_CONFIG_DIR=%USERPROFILE%\.lmstudio"
+set "LMSTUDIO_CONFIG_FILE=%LMSTUDIO_CONFIG_DIR%\mcp.json"
+
+set /p CONFIGURE_LMSTUDIO="  Configure LM Studio for ReaperMCP? (y/n): "
+if /i not "!CONFIGURE_LMSTUDIO!"=="y" (
+    echo   Skipped. See docs/INSTALLATION.md for manual setup.
+    goto :skip_lmstudio_config
+)
+
+if not exist "%LMSTUDIO_CONFIG_DIR%" mkdir "%LMSTUDIO_CONFIG_DIR%"
+
+if exist "%LMSTUDIO_CONFIG_FILE%" (
+    findstr /c:"\"reaper\"" "%LMSTUDIO_CONFIG_FILE%" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo   LM Studio config already has reaper entry - skipping.
+        goto :skip_lmstudio_config
+    )
+    copy "%LMSTUDIO_CONFIG_FILE%" "%LMSTUDIO_CONFIG_FILE%.bak" >nul 2>&1
+    echo   Backed up existing config to: %LMSTUDIO_CONFIG_FILE%.bak
+    echo.
+    echo   Found existing LM Studio config at:
+    echo   %LMSTUDIO_CONFIG_FILE%
+    echo.
+    echo   You need to MANUALLY add this inside your "mcpServers" block:
+    echo.
+    echo     "reaper": {
+    echo       "command": "reaper-mcp"
+    echo     }
+    echo.
+    echo   Opening the config file for you...
+    notepad "%LMSTUDIO_CONFIG_FILE%"
+    goto :skip_lmstudio_config
+)
+
+(
+echo {
+echo   "mcpServers": {
+echo     "reaper": {
+echo       "command": "reaper-mcp"
+echo     }
+echo   }
+echo }
+) > "%LMSTUDIO_CONFIG_FILE%"
+echo   Created LM Studio config at:
+echo   %LMSTUDIO_CONFIG_FILE%
+
+:skip_lmstudio_config
+
 :: ── Done ──────────────────────────────────────────────────
 echo.
-echo [5/5] Done!
+echo [6/6] Done!
 echo.
 echo  ============================================
 echo   SETUP COMPLETE!
@@ -232,7 +286,7 @@ if !errorlevel! equ 0 (
     echo.
     echo   1. Open REAPER ^(or restart it if it's already open^) - ReaperMCP
     echo      loads automatically now, nothing to click.
-    echo   2. Restart Claude Desktop (if it's open)
+    echo   2. Restart Claude Desktop / LM Studio (whichever you configured, if open)
     echo   3. Ask Claude: "Get info about the current REAPER project"
     echo.
 ) else (
@@ -243,7 +297,7 @@ if !errorlevel! equ 0 (
     echo      Actions ^> Show action list ^> Load ReaScript...
     echo      Select: reaper_scripts\reaper_mcp_server.lua
     echo      Click "Run"
-    echo   3. Restart Claude Desktop (if it's open)
+    echo   3. Restart Claude Desktop / LM Studio (whichever you configured, if open)
     echo   4. Ask Claude: "Get info about the current REAPER project"
     echo.
     echo  The Lua script must be running in REAPER for MCP to work.

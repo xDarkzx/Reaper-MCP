@@ -174,6 +174,35 @@ Or create `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for g
 }
 ```
 
+### LM Studio
+
+**If you used the one-click installer**, this is already done — skip to [Verify It Works](#verify-it-works).
+
+**Manual setup:**
+
+1. Open LM Studio → **Program** tab in the right sidebar → **Install** → **Edit mcp.json**
+2. Add the `reaper` entry inside `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "reaper-mcp"
+    }
+  }
+}
+```
+
+3. Save — LM Studio loads MCP servers defined in `mcp.json` automatically.
+
+<details>
+<summary>Config file location</summary>
+
+- **Windows:** `%USERPROFILE%\.lmstudio\mcp.json`
+- **macOS / Linux:** `~/.lmstudio/mcp.json`
+
+</details>
+
 ### Other MCP Clients
 
 ReaperMCP uses **stdio transport**. Point any MCP-compatible client at the `reaper-mcp` command.

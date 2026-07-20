@@ -27,7 +27,7 @@ echo "  Platform: $(uname -s) $(uname -m)"
 echo ""
 
 # ── Check Python ──────────────────────────────────────────
-echo "[1/5] Checking Python..."
+echo "[1/6] Checking Python..."
 if command -v python3 &> /dev/null; then
     PYTHON=python3
 elif command -v python &> /dev/null; then
@@ -114,7 +114,7 @@ fi
 
 # ── Install reaper-mcp ────────────────────────────────────
 echo ""
-echo "[2/5] Installing reaper-mcp..."
+echo "[2/6] Installing reaper-mcp..."
 
 # Check if pip is available
 if ! $PYTHON -m pip --version &> /dev/null; then
@@ -209,7 +209,7 @@ fi
 # needed. This removes the "load the Lua script every time REAPER opens"
 # manual step for anyone who runs this installer.
 echo ""
-echo "[3/5] Setting up REAPER auto-start..."
+echo "[3/6] Setting up REAPER auto-start..."
 
 if [[ "${OSTYPE:-}" == "darwin"* ]]; then
     REAPER_RESOURCE_DIR="$HOME/Library/Application Support/REAPER"
@@ -253,7 +253,7 @@ fi
 
 # ── Configure Claude Desktop ──────────────────────────────
 echo ""
-echo "[4/5] Configuring Claude Desktop..."
+echo "[4/6] Configuring Claude Desktop..."
 
 read -rp "  Configure Claude Desktop for ReaperMCP? (y/n): " CONFIGURE_CLAUDE
 if [[ ! "$CONFIGURE_CLAUDE" =~ ^[Yy]$ ]]; then
@@ -302,9 +302,58 @@ EOF
     fi
 fi
 
+# ── Configure LM Studio ───────────────────────────────────
+# LM Studio's mcp.json uses the exact same {"mcpServers": {...}} shape as
+# Claude Desktop's config, just a different file location — no XDG
+# variance, same path on macOS and Linux.
+echo ""
+echo "[5/6] Configuring LM Studio..."
+
+read -rp "  Configure LM Studio for ReaperMCP? (y/n): " CONFIGURE_LMSTUDIO
+if [[ ! "$CONFIGURE_LMSTUDIO" =~ ^[Yy]$ ]]; then
+    echo "  Skipped. See docs/INSTALLATION.md for manual setup."
+else
+    LMSTUDIO_CONFIG_DIR="$HOME/.lmstudio"
+    LMSTUDIO_CONFIG_FILE="$LMSTUDIO_CONFIG_DIR/mcp.json"
+
+    mkdir -p "$LMSTUDIO_CONFIG_DIR"
+
+    if [ -f "$LMSTUDIO_CONFIG_FILE" ]; then
+        if grep -q '"reaper"' "$LMSTUDIO_CONFIG_FILE" 2>/dev/null; then
+            echo "  LM Studio config already has reaper entry - skipping."
+        else
+            cp "$LMSTUDIO_CONFIG_FILE" "$LMSTUDIO_CONFIG_FILE.bak"
+            echo "  Backed up existing config to: $LMSTUDIO_CONFIG_FILE.bak"
+            echo ""
+            echo "  Found existing LM Studio config at:"
+            echo "  $LMSTUDIO_CONFIG_FILE"
+            echo ""
+            echo "  Add this inside your \"mcpServers\" block:"
+            echo ""
+            echo '    "reaper": {'
+            echo '      "command": "reaper-mcp"'
+            echo '    }'
+            echo ""
+        fi
+    else
+        cat > "$LMSTUDIO_CONFIG_FILE" << 'EOF'
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "reaper-mcp"
+    }
+  }
+}
+EOF
+        chmod 600 "$LMSTUDIO_CONFIG_FILE"
+        echo "  Created LM Studio config at:"
+        echo "  $LMSTUDIO_CONFIG_FILE"
+    fi
+fi
+
 # ── Done ──────────────────────────────────────────────────
 echo ""
-echo "[5/5] Done!"
+echo "[6/6] Done!"
 echo ""
 echo " ============================================"
 echo "  SETUP COMPLETE!"
@@ -315,7 +364,7 @@ if [ -f "$STARTUP_SCRIPT" ] && grep -qF "reaper_mcp_server.lua" "$STARTUP_SCRIPT
     echo ""
     echo "  1. Open REAPER (or restart it if it's already open) — ReaperMCP"
     echo "     loads automatically now, nothing to click."
-    echo "  2. Restart Claude Desktop (if it's open)"
+    echo "  2. Restart Claude Desktop / LM Studio (whichever you configured, if open)"
     echo "  3. Ask Claude: \"Get info about the current REAPER project\""
     echo ""
 else
@@ -326,7 +375,7 @@ else
     echo "     Actions > Show action list > Load ReaScript..."
     echo "     Select: reaper_scripts/reaper_mcp_server.lua"
     echo "     Click \"Run\""
-    echo "  3. Restart Claude Desktop (if it's open)"
+    echo "  3. Restart Claude Desktop / LM Studio (whichever you configured, if open)"
     echo "  4. Ask Claude: \"Get info about the current REAPER project\""
     echo ""
     echo " The Lua script must be running in REAPER for MCP to work."

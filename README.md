@@ -34,6 +34,7 @@ ReaperMCP works with any AI client that supports the [Model Context Protocol](ht
 - [Claude Desktop](https://claude.ai/download) — Anthropic's desktop app
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — CLI agent
 - [Cursor](https://www.cursor.com/) — AI code editor with MCP support
+- [LM Studio](https://lmstudio.ai/) — run local models with MCP tool access
 - Any other [MCP-compatible client](https://modelcontextprotocol.io/clients)
 
 ---
@@ -42,9 +43,22 @@ ReaperMCP works with any AI client that supports the [Model Context Protocol](ht
 
 ### 1. Get ReaperMCP
 
-**Option A:** Click the green **Code** button above → **Download ZIP** → extract to a folder
+**Option A:** Click the green **Code** button above → **Download ZIP** → extract to a folder — works with nothing pre-installed, easiest on a brand new machine.
 
-**Option B:** Clone with git:
+**Option B:** Clone with git (lets you `git pull` for updates later):
+
+A fresh Windows install doesn't ship with git — check first:
+```powershell
+git --version
+```
+If that says "not recognized", install it, then close and reopen your terminal:
+```powershell
+winget install --id Git.Git -e --source winget
+```
+(`winget` itself ships with Windows 11 and up-to-date Windows 10. If `winget` isn't found either, grab the installer directly from [git-scm.com](https://git-scm.com/download/win).)
+
+macOS/Linux almost always have git already — `git --version` to check, or `brew install git` / `sudo apt install git` if not.
+
 ```bash
 git clone https://github.com/xDarkzx/Reaper-MCP.git
 ```
