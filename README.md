@@ -21,6 +21,9 @@
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
+
+
+
 ---
 
 ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production through **163 tools across 25 modules** — transport, tracks, MIDI, patterns (drum / chord progressions), loop-library pipeline, **vocal chops** (end-to-end `chop_pipeline` with chillstep / future-bass / porter / trap styles, plus primitives), FX, envelopes, sidechain, mixing, mastering, bus pipelines, and objective audio analysis. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
