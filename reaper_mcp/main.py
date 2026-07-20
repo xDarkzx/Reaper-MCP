@@ -5,23 +5,27 @@ import threading
 import time
 
 # MCP's stdio transport requires UTF-8 JSON-RPC framing, but Python's default
-# stdio encoding on Windows follows the OS's legacy ANSI codepage (cp1252 on
-# this machine) unless told otherwise — never UTF-8 unless the system has
-# opted into "Use Unicode UTF-8 for worldwide language support", which is off
-# by default. Tool docstrings throughout this codebase use non-ASCII
+# stdio encoding follows the OS/locale's default codepage unless told
+# otherwise — on Windows that's a legacy ANSI codepage (cp1252 observed on
+# the machine this was found on), never UTF-8 unless the system has opted
+# into "Use Unicode UTF-8 for worldwide language support" (off by default).
+# Not exclusively a Windows problem either — a minimal/Docker Linux image or
+# an old system still defaulting to the POSIX/C locale is ASCII-only, same
+# failure mode. Tool docstrings throughout this codebase use non-ASCII
 # characters (em dashes, arrows like "kick→bass" in the sidechain tools) —
-# under cp1252 those raise UnicodeEncodeError the instant they're written to
-# stdout, which is completely unhandled this deep in the transport and kills
-# the whole process. Since tools/list (sending every registered tool's
-# description) is one of the first things every client does on connect, this
-# crashed the server on effectively every session start on affected systems,
-# surfacing to the client as "Server disconnected" with no further detail.
-# Must happen before anything touches stdio — earlier than the FastMCP import
-# even risks it, so this is the very first thing in the file.
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stdin.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+# under a non-UTF-8 encoding those raise UnicodeEncodeError the instant
+# they're written to stdout, which is completely unhandled this deep in the
+# transport and kills the whole process. Since tools/list (sending every
+# registered tool's description) is one of the first things every client
+# does on connect, this crashed the server on effectively every session
+# start on an affected system, surfacing to the client as "Server
+# disconnected" with no further detail. Applied unconditionally, not gated
+# to a platform check — a no-op on a system that's already UTF-8, and must
+# happen before anything touches stdio (earlier than the FastMCP import even
+# risks it), so this is the very first thing in the file.
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
 from mcp.server.fastmcp import FastMCP
 

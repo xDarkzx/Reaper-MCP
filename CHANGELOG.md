@@ -215,6 +215,17 @@ All notable changes to ReaperMCP will be documented in this file.
   is still accepted since literal silence is a legitimate value, only
   invalid/negative values are rejected. Verified directly against the
   exact -138 case plus every other invalid shape.
+- **The UTF-8 stdio fix (above) was needlessly gated to `sys.platform ==
+  "win32"`.** The underlying requirement — MCP's stdio transport needs
+  UTF-8 JSON-RPC framing — isn't Windows-specific; a minimal/Docker Linux
+  image or any system still defaulting to the POSIX/C locale (ASCII-only,
+  not UTF-8) hits the identical crash. Reconfiguring stdout/stdin/stderr to
+  UTF-8 is a harmless no-op on a system that's already UTF-8, so there's no
+  reason to gate it — now applied unconditionally on every platform.
+  Verified end-to-end (not just compiled): a fresh server handled
+  initialize → `tools/list` (all 164 tools, arrow character intact) → a
+  real `tools/call`, stayed alive throughout, zero malformed protocol
+  lines. Run twice for consistency.
 
 ## [0.4.0] - 2026-07-20
 
