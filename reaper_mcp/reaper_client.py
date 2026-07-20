@@ -10,7 +10,7 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-from reaper_mcp_shared.constants import Connection, Timeouts
+from reaper_mcp_shared.constants import Connection, Timeouts, ensure_private_dir
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 # Heartbeat: lock file must be updated within this many seconds
@@ -29,7 +29,7 @@ def _log_slow(command: str, stages: dict) -> None:
     if stages.get("total", 0) < _SLOW_THRESHOLD_SECONDS:
         return
     try:
-        os.makedirs(Connection.IPC_DIR, exist_ok=True)
+        ensure_private_dir(Connection.IPC_DIR)
         parts = " ".join(
             f"{k}={v}" if k == "poll_iters" else f"{k}={v:.2f}s"
             for k, v in stages.items()
@@ -53,7 +53,7 @@ def _ipc_mutex(timeout: float):
     polling loop (not a blocking OS wait) so we can respect the caller's
     timeout budget and raise a normal ReaperMCPError instead of hanging.
     """
-    os.makedirs(Connection.IPC_DIR, exist_ok=True)
+    ensure_private_dir(Connection.IPC_DIR)
     fd = open(Connection.IPC_MUTEX_FILE, "a+b")
     try:
         fd.seek(0, os.SEEK_END)
@@ -119,7 +119,7 @@ def _is_wsl() -> bool:
 class ReaperClient:
     def __init__(self):
         self._lock = asyncio.Lock()
-        os.makedirs(Connection.IPC_DIR, exist_ok=True)
+        ensure_private_dir(Connection.IPC_DIR)
 
     def _check_server(self):
         if not os.path.exists(Connection.LOCK_FILE):

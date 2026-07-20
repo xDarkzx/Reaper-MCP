@@ -19,6 +19,7 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp_shared.path_safety import safe_path
 
 try:
     import numpy as np
@@ -44,10 +45,17 @@ _LUFS_REFERENCE = {
 
 
 def _safe_audio_path(path: str) -> str:
-    """Resolve and validate a path to an existing audio file."""
+    """Resolve and validate a path to an existing audio file.
+
+    Routes through the same system-directory/traversal guard every other
+    path-accepting tool uses (project_open, item_insert_media, etc.) —
+    previously this was the one path parameter in the codebase with no such
+    check, low risk in practice (read-only, and soundfile.read() rejects
+    anything that isn't actually a valid audio file) but inconsistent.
+    """
     if not path:
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "wav_path is required")
-    abs_path = os.path.abspath(os.path.expanduser(path))
+    abs_path = safe_path(path)
     if not os.path.isfile(abs_path):
         raise ReaperMCPError(
             ErrorCode.INVALID_PATH,

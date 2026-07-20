@@ -25,6 +25,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp_shared.path_safety import safe_path
 
 
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".aif", ".aiff", ".ogg", ".m4a"}
@@ -139,9 +140,15 @@ def _duration_seconds(path: Path) -> float | None:
 
 
 def _safe_folder(path: str) -> Path:
+    """Validate a folder path — same system-directory/traversal guard every
+    other path-accepting tool uses, plus the exists()/is_dir() checks a
+    folder scan specifically needs (safe_path alone doesn't require the
+    path to already exist, since e.g. project_save_as writes to a new one).
+    """
     if not path or not path.strip():
         raise ReaperMCPError(ErrorCode.INVALID_PATH, "folder path is required")
     p = Path(path).expanduser().resolve()
+    safe_path(str(p))
     if not p.exists():
         raise ReaperMCPError(ErrorCode.INVALID_PATH, f"Folder not found: {p}")
     if not p.is_dir():

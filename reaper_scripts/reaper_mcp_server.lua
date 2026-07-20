@@ -42,8 +42,14 @@ local function setup_ipc()
     reaper.RecursiveCreateDirectory(ipc_dir, 0)
   else
     -- Very old REAPER fallback: shell mkdir with defensive quoting.
-    -- Replace any embedded quote in the path with underscore.
-    local safe_dir = ipc_dir:gsub('"', "_")
+    -- Allowlist, not denylist — only path-legal characters survive
+    -- (alphanumeric, -, ., space, :, / and \). Stripping just the quote
+    -- character (the previous approach) still let $(...) / backtick
+    -- command substitution through inside the surrounding double quotes;
+    -- this closes that off by replacing anything that isn't a safe path
+    -- character with "_", regardless of which specific characters would
+    -- have been dangerous.
+    local safe_dir = ipc_dir:gsub('[^%w%-%.%s:/\\]', "_")
     if sep == "\\" then
       os.execute('mkdir "' .. safe_dir .. '" 2>nul')
     else

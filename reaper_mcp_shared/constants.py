@@ -8,6 +8,29 @@ import os
 import tempfile
 
 
+def ensure_private_dir(path: str) -> None:
+    """Create a directory if missing, and best-effort restrict it to the
+    owning user only (0700).
+
+    Defense against a shared multi-user Unix machine: if TMPDIR isn't set,
+    IPC_DIR falls back to a bare /tmp/reaper_mcp — on a system where /tmp is
+    shared across users (the Unix default), a different local user's
+    reaper-mcp could otherwise read or write into these IPC files. 0700
+    closes that off. Best-effort and non-fatal: if the directory already
+    exists owned by a different user, this chmod attempt simply fails here
+    (caught), and subsequent read/write attempts inside it will then fail
+    with a normal permission error instead of silently succeeding across
+    users — a safe failure, not a silent one. Largely a no-op on Windows
+    (%TEMP% is already per-user by default there, and os.chmod only
+    toggles the read-only attribute, not real multi-user ACLs).
+    """
+    os.makedirs(path, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 class Connection:
     IPC_DIR = os.path.join(tempfile.gettempdir(), "reaper_mcp")
     COMMAND_FILE = os.path.join(IPC_DIR, "command.json")

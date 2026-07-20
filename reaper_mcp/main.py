@@ -32,7 +32,7 @@ from mcp.server.fastmcp import FastMCP
 from reaper_mcp.instructions import load_instructions
 from reaper_mcp.reaper_client import ReaperClient
 from reaper_mcp.tool_registry import register_all_tools
-from reaper_mcp_shared.constants import Connection
+from reaper_mcp_shared.constants import Connection, ensure_private_dir
 
 mcp = FastMCP("ReaperMCP", instructions=load_instructions())
 client = ReaperClient()
@@ -54,7 +54,7 @@ def _claim_generation(ppid: int) -> None:
     falls back to the parent-liveness watchdog alone, which is safe.
     """
     try:
-        os.makedirs(Connection.GENERATION_DIR, exist_ok=True)
+        ensure_private_dir(Connection.GENERATION_DIR)
         path = _generation_file(ppid)
         tmp = f"{path}.tmp.{os.getpid()}"
         with open(tmp, "w") as f:

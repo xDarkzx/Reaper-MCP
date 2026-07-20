@@ -226,6 +226,55 @@ All notable changes to ReaperMCP will be documented in this file.
   initialize → `tools/list` (all 164 tools, arrow character intact) → a
   real `tools/call`, stayed alive throughout, zero malformed protocol
   lines. Run twice for consistency.
+- **Full security audit** — no code-execution primitives found anywhere
+  (`subprocess`/`os.system`/`eval`/`exec`/`pickle` all absent from the
+  Python side; the Lua JSON parser is a genuine hand-written
+  recursive-descent parser, not a `load()`/`loadstring()` shortcut, so a
+  crafted tool argument can't reach Lua code execution). No network
+  surface at all — this is 100% local file-based IPC, nothing binds a
+  port or makes outbound calls. Three real findings closed:
+  - `analyze_loudness`/`analyze_clipping`/`analyze_frequency_spectrum`/
+    `analyze_stereo_field`'s `wav_path` and `scan_audio_folder`'s `path`
+    were the only path parameters in the codebase not routed through the
+    system-directory/traversal guard every write-capable tool
+    (`project_open`, `project_save_as`, `project_backup`,
+    `project_export_audio`, `item_insert_media`) already used. Low risk in
+    practice (both read-only; `analyze_*` additionally constrained by
+    `soundfile.read()` rejecting anything that isn't a real audio file),
+    but inconsistent. The guard itself was also duplicated verbatim
+    between `item_tools.py` and `project_tools.py` — consolidated both
+    into a new shared `reaper_mcp_shared/path_safety.py`, now used by all
+    four modules.
+  - The Lua `os.execute` `mkdir` fallback (only reachable on very old
+    REAPER builds lacking `RecursiveCreateDirectory`, which the primary
+    path already uses instead) stripped embedded double-quotes from the
+    path before shelling out, but that denylist didn't block `$(...)` /
+    backtick command substitution, which bash still evaluates inside
+    double quotes. Switched to an allowlist — only path-legal characters
+    (alphanumeric, `-`, `.`, space, `:`, `/`, `\`) survive, everything
+    else becomes `_` — closing the gap regardless of which specific
+    character would have been dangerous. Exploiting the original version
+    would have required an attacker who could already set the `TMPDIR`
+    env var for the REAPER process, at which point they don't need this
+    bug — low real-world risk, still worth closing properly.
+  - On a shared multi-user Unix machine, the IPC temp directory (falls
+    back to a bare `/tmp/reaper_mcp` when `TMPDIR` isn't set) wasn't
+    isolated per-user — a different local user could potentially read or
+    write into it. New `ensure_private_dir()` helper in
+    `reaper_mcp_shared/constants.py` creates the directory and best-effort
+    `chmod`s it to `0700` (owner-only); if a different user already owns
+    it, the chmod fails harmlessly and subsequent access attempts then
+    fail with a normal permission error instead of silently sharing state.
+    Deliberately did NOT go with per-user directory naming (e.g.
+    embedding the username in the path) — that would require Python and
+    Lua to independently resolve the same username and agree, and any
+    divergence between the two (missing env vars, edge-case locale) would
+    silently break the IPC bridge entirely, a worse outcome than the
+    issue being fixed. Not a Windows concern — `%TEMP%` is already
+    per-user there by default.
+  All three verified directly (permission bits after `ensure_private_dir`,
+  system-dir rejection on the two previously-unguarded tools, legitimate
+  paths still accepted). 91/91 tests pass.
 
 ## [0.4.0] - 2026-07-20
 
