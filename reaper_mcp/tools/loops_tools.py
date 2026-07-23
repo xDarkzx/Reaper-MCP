@@ -424,7 +424,8 @@ def register(mcp: FastMCP):
                 track_idx = existing[track_name]
             else:
                 result = await client.execute("track_create", name=track_name)
-                new_idx = result.get("index", result.get("track_index"))
+                tc_data = result.get("data", result)
+                new_idx = tc_data.get("index", tc_data.get("track_index"))
                 if new_idx is None:
                     errors.append({
                         "index": i,

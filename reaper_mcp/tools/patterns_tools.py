@@ -274,7 +274,8 @@ def register(mcp: FastMCP):
                 position=position_sec,
                 length=length_sec,
             )
-            item_index = int(result.get("item_index", result.get("index", 0)))
+            data = result.get("data", result)
+            item_index = int(data.get("item_index", data.get("index", 0)))
             created_item = True
 
         await client.execute(
@@ -398,7 +399,8 @@ def register(mcp: FastMCP):
                 position=position_sec,
                 length=length_sec,
             )
-            item_index = int(result.get("item_index", result.get("index", 0)))
+            data = result.get("data", result)
+            item_index = int(data.get("item_index", data.get("index", 0)))
             created_item = True
 
         await client.execute(
