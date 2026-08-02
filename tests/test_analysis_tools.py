@@ -13,6 +13,7 @@ from reaper_mcp.tools.analysis_tools import (
     _find_silence_candidates,
     _find_peak_candidates,
     _clamp_region,
+    _truncate_candidates,
 )
 
 
@@ -92,6 +93,48 @@ class TestFindPeakCandidates:
         low_sensitivity = _find_peak_candidates(mono, sr, sensitivity=1.0)
         high_sensitivity = _find_peak_candidates(mono, sr, sensitivity=50.0)
         assert len(low_sensitivity) >= len(high_sensitivity)
+
+    def test_busy_percussive_signal_can_produce_hundreds_of_candidates(self):
+        """The scenario the truncation cap exists for: a busy mix (regular
+        transients throughout, e.g. hi-hats) triggers one candidate per hit
+        with nothing to cap the total — confirms the underlying detector is
+        genuinely unbounded, not just theoretically so."""
+        sr = 44100
+        duration_sec = 30
+        rng = np.random.default_rng(1)
+        mono = rng.normal(0, 1e-5, sr * duration_sec).astype(np.float64)
+        # A transient every 1/8 second — 8 hits/sec, 30s = 240 candidates.
+        hit_every = int(sr * 0.125)
+        for start in range(0, len(mono) - 5, hit_every):
+            mono[start:start + 5] = 0.5
+        candidates = _find_peak_candidates(mono, sr, sensitivity=3.0)
+        assert len(candidates) > 200  # comfortably over MAX_ANALYSIS_CANDIDATES (300) territory
+
+
+class TestTruncateCandidates:
+    def test_under_cap_returns_unchanged_not_truncated(self):
+        items = [{"i": i} for i in range(5)]
+        result, truncated = _truncate_candidates(items, max_n=10)
+        assert result == items
+        assert truncated is False
+
+    def test_exactly_at_cap_not_truncated(self):
+        items = [{"i": i} for i in range(10)]
+        result, truncated = _truncate_candidates(items, max_n=10)
+        assert result == items
+        assert truncated is False
+
+    def test_over_cap_truncated_and_sliced(self):
+        items = [{"i": i} for i in range(15)]
+        result, truncated = _truncate_candidates(items, max_n=10)
+        assert len(result) == 10
+        assert truncated is True
+        assert result == items[:10]  # keeps the first N, not a random subset
+
+    def test_empty_list_not_truncated(self):
+        result, truncated = _truncate_candidates([], max_n=10)
+        assert result == []
+        assert truncated is False
 
 
 class TestClampRegion:

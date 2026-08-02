@@ -21,6 +21,9 @@ import sys
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.path_safety import safe_path
+from reaper_mcp_shared.constants import (
+    MAX_ANALYSIS_CANDIDATES, MAX_ANALYSIS_CANDIDATES_PER_REGION,
+)
 
 try:
     import numpy as np
@@ -178,6 +181,22 @@ def _find_peak_candidates(mono, sr: int, sensitivity: float) -> list:
     return candidates
 
 
+def _truncate_candidates(candidates: list, max_n: int) -> tuple[list, bool]:
+    """Cap a candidate list, reporting whether anything was cut.
+
+    A busy percussive mix or a noisy dialogue take can produce far more
+    candidates than anyone would review — same shape of problem as
+    fx_set_preset's full-parameter dump, just triggered by content instead
+    of a large plugin. Truncating without saying so would silently hide how
+    many were found; `truncated=True` plus the true count lets the caller
+    decide whether to narrow the analysis (e.g. a shorter region, a higher
+    sensitivity) instead of drowning in candidates.
+    """
+    if len(candidates) <= max_n:
+        return candidates, False
+    return candidates[:max_n], True
+
+
 def _clamp_region(start: float, end: float, total_duration_sec: float) -> tuple:
     start = max(0.0, min(start, total_duration_sec))
     end = max(0.0, min(end, total_duration_sec))
@@ -327,16 +346,25 @@ def register(mcp: FastMCP):
         samples, sr = _load_wav(wav_path)
         mono = _to_mono(samples.astype(np.float64))
         candidates = _find_silence_candidates(mono, sr, threshold_db, min_duration)
+        total_found = len(candidates)
         total_silence = round(sum(c["duration_sec"] for c in candidates), 3)
+        candidates, truncated = _truncate_candidates(candidates, MAX_ANALYSIS_CANDIDATES)
         hint = (
             "No silence candidates found."
             if not candidates
             else f"{len(candidates)} silence candidate(s) found ({total_silence}s total)."
         )
+        if truncated:
+            hint += (
+                f" Truncated to {MAX_ANALYSIS_CANDIDATES} of {total_found} — "
+                f"raise min_duration or split into smaller regions with analyze_region_qc."
+            )
         return {
             "threshold_db": threshold_db,
             "min_duration": min_duration,
             "candidates": candidates,
+            "candidates_found": total_found,
+            "truncated": truncated,
             "total_silence_sec": total_silence,
             "hint": hint,
         }
@@ -362,15 +390,24 @@ def register(mcp: FastMCP):
         samples, sr = _load_wav(wav_path)
         mono = _to_mono(samples.astype(np.float64))
         candidates = _find_peak_candidates(mono, sr, sensitivity)
+        total_found = len(candidates)
+        candidates, truncated = _truncate_candidates(candidates, MAX_ANALYSIS_CANDIDATES)
         hint = (
             "No peak/click candidates found."
             if not candidates
             else f"{len(candidates)} peak/click candidate(s) found — listen and trim "
                  f"or use spectral repair if confirmed."
         )
+        if truncated:
+            hint += (
+                f" Truncated to {MAX_ANALYSIS_CANDIDATES} of {total_found} — "
+                f"raise sensitivity to narrow down to the most confident hits."
+            )
         return {
             "sensitivity": sensitivity,
             "candidates": candidates,
+            "candidates_found": total_found,
+            "truncated": truncated,
             "hint": hint,
         }
 
@@ -420,27 +457,41 @@ def register(mcp: FastMCP):
             for c in peaks:
                 c["time_sec"] = round(c["time_sec"] + start, 3)
 
-            flag_count = len(silence) + len(peaks)
-            total_flags += flag_count
+            # Per-region cap, not just a whole-file one — up to 200 regions
+            # in a single call means an unbounded per-region list multiplies
+            # fast. Smaller than the whole-file cap since a QC pass over one
+            # region is meant to be a quick read, not a full inventory.
+            flag_count_found = len(silence) + len(peaks)
+            silence, silence_truncated = _truncate_candidates(silence, MAX_ANALYSIS_CANDIDATES_PER_REGION)
+            peaks, peaks_truncated = _truncate_candidates(peaks, MAX_ANALYSIS_CANDIDATES_PER_REGION)
+            total_flags += flag_count_found
             results.append({
                 "name": r.get("name", ""),
                 "start": start,
                 "end": end,
                 "silence_candidates": silence,
                 "peak_candidates": peaks,
-                "flag_count": flag_count,
+                "flag_count": flag_count_found,
+                "truncated": silence_truncated or peaks_truncated,
             })
 
+        any_truncated = any(r["truncated"] for r in results)
         hint = (
             f"{total_flags} candidate(s) across {len(results)} region(s) — "
             f"review flagged regions before final edit."
             if total_flags
             else f"No candidates found across {len(results)} region(s)."
         )
+        if any_truncated:
+            hint += (
+                f" One or more regions hit the {MAX_ANALYSIS_CANDIDATES_PER_REGION}-candidate "
+                f"cap — check each region's own \"truncated\" flag."
+            )
         return {
             "region_count": len(results),
             "regions": results,
             "total_flags": total_flags,
+            "any_region_truncated": any_truncated,
             "hint": hint,
         }
 

@@ -80,3 +80,11 @@ MAX_TOTAL_NOTES_PER_CALL = 50000 # Sum of notes across all tracks in one call
 # write-side limits, but tune independently — they bound different things.
 MAX_NOTES_READ_RESULTS = 10000       # `midi_get_notes` max_results ceiling
 MAX_ENVELOPE_POINTS_PER_CALL = 50000 # `envelope_add_points` points-per-call ceiling
+
+# analyze_silence/analyze_peaks candidate lists were unbounded — a busy
+# percussive mix could return thousands of peak candidates (same shape of
+# problem as the fx_set_preset full-param-dump issue, different tool).
+# Whole-file cap; analyze_region_qc uses a smaller per-region cap since its
+# total is multiplied across up to 200 regions in one call.
+MAX_ANALYSIS_CANDIDATES = 300
+MAX_ANALYSIS_CANDIDATES_PER_REGION = 50
