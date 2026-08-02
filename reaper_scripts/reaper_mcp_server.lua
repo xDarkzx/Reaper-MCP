@@ -1396,13 +1396,52 @@ function fx.fx_get_preset(p)
   return {fx_name = fx_name, preset = preset, preset_index = pi, total_presets = total_presets}
 end
 
+-- Trim surrounding whitespace. Preset names are compared trimmed because some
+-- plugins report them padded to a fixed width (KORG TRINITY pads to 16 chars),
+-- while REAPER's own presets/*.ini stores the same names trimmed.
+local function trim_ws(s)
+  return (tostring(s):gsub("^%s*(.-)%s*$", "%1"))
+end
+
 function fx.fx_set_preset(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
   if not p.preset_name then return nil, "Missing parameter: preset_name" end
   local fi = require_int(p, "fx_index")
-  reaper.TrackFX_SetPreset(tr, fi, p.preset_name)
-  return build_fx_params(tr, fi)
+  local requested = tostring(p.preset_name)
+
+  local applied = reaper.TrackFX_SetPreset(tr, fi, requested)
+  local _, active = reaper.TrackFX_GetPreset(tr, fi, "")
+  active = active or ""
+
+  -- Verify against what is actually loaded instead of trusting the call:
+  -- TrackFX_SetPreset can leave the preset untouched when the name does not
+  -- match the plugin's exact spelling, and the caller would otherwise get a
+  -- success response for a no-op.
+  if not applied or trim_ws(active) ~= trim_ws(requested) then
+    return nil, string.format(
+      "preset not applied: requested %q, still active is %q. The name must "
+      .. "match the plugin's spelling; some plugins pad to a fixed width. Read "
+      .. "it from fx_get_preset or fx_navigate_preset — REAPER's presets/*.ini "
+      .. "stores names trimmed and is not a reliable source.",
+      requested, active)
+  end
+
+  local pi, total_presets = reaper.TrackFX_GetPresetIndex(tr, fi)
+  local _, fx_name = reaper.TrackFX_GetFXName(tr, fi, "")
+  local result = {
+    fx_name = fx_name,
+    preset = active,
+    preset_index = pi,
+    total_presets = total_presets,
+  }
+  -- Opt-in only: the full parameter list runs to tens of thousands of
+  -- characters on large instruments and is rarely what a caller wants back
+  -- from a preset switch. fx_get_params covers the case where it is.
+  if p.include_params then
+    result.params = build_fx_params(tr, fi)
+  end
+  return result
 end
 
 function fx.fx_navigate_preset(p)

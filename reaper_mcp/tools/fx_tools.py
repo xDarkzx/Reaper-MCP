@@ -176,13 +176,31 @@ def register(mcp: FastMCP):
         return await client.execute("fx_get_preset", track_index=track_index, fx_index=fx_index)
 
     @mcp.tool()
-    async def fx_set_preset(track_index: int, fx_index: int, preset_name: str) -> dict:
-        """Load preset by name.
+    async def fx_set_preset(
+        track_index: int,
+        fx_index: int,
+        preset_name: str,
+        include_params: bool = False,
+    ) -> dict:
+        """Load preset by name. Returns the resulting preset, not the parameters.
+
+        The name must match the plugin's own spelling. Some plugins report
+        names padded to a fixed width (e.g. KORG TRINITY pads to 16 chars),
+        and the padded form is what has to be passed. Take the name from
+        fx_get_preset or fx_navigate_preset rather than from REAPER's
+        presets/*.ini, which stores it trimmed.
+
+        If the preset does not actually change, this raises instead of
+        reporting success.
 
         Args:
             track_index: 0-based track index.
             fx_index: 0-based FX chain index.
-            preset_name: Preset name.
+            preset_name: Preset name, exactly as the plugin reports it.
+            include_params: Also return the plugin's full parameter list.
+                Off by default — on large instruments that runs to tens of
+                thousands of characters. Use fx_get_params when the
+                parameters are what you actually want.
         """
         if track_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
@@ -190,7 +208,13 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if not preset_name:
             raise ReaperMCPError(ErrorCode.MISSING_PARAMETER, "preset_name cannot be empty")
-        return await client.execute("fx_set_preset", track_index=track_index, fx_index=fx_index, preset_name=preset_name)
+        return await client.execute(
+            "fx_set_preset",
+            track_index=track_index,
+            fx_index=fx_index,
+            preset_name=preset_name,
+            include_params=include_params,
+        )
 
     @mcp.tool()
     async def fx_navigate_preset(track_index: int, fx_index: int, direction: int) -> dict:
