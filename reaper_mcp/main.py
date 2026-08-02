@@ -23,9 +23,13 @@ import time
 # to a platform check — a no-op on a system that's already UTF-8, and must
 # happen before anything touches stdio (earlier than the FastMCP import even
 # risks it), so this is the very first thing in the file.
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stdin.reconfigure(encoding="utf-8")
-sys.stderr.reconfigure(encoding="utf-8")
+# Guarded per stream: under pytest (and in embedded hosts) sys.stdin/stdout
+# can be a substitute object without .reconfigure, and an AttributeError here
+# would make the module unimportable rather than just skipping a no-op.
+for _stream in (sys.stdout, sys.stdin, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        _reconfigure(encoding="utf-8")
 
 from mcp.server.fastmcp import FastMCP
 
@@ -62,6 +66,33 @@ def _claim_generation(ppid: int) -> None:
         os.replace(tmp, path)  # atomic — readers never see a torn write
     except OSError:
         pass
+
+
+def supersede_enabled(env: dict | None = None) -> bool:
+    """Whether the "a newer server took over" self-retirement path is active.
+
+    Set REAPER_MCP_NO_SUPERSEDE=1 to switch it off. Needed for clients that
+    open more than one connection under a single parent process: the
+    generation slot is keyed by parent PID, so a second concurrent
+    connection from the same client looks identical to that client having
+    reconnected, and the first server retires while its connection is still
+    in active use. Observed with Claude Desktop, which spawns two servers
+    under one parent — the client keeps talking to the first one, which
+    exits, and every tool call then hangs with no response.
+
+    Switching this off leaves the two mechanisms that actually own shutdown
+    intact: stdio EOF when the client closes the pipes, and the
+    parent-liveness watchdog. Those cover the normal cases; this path is
+    belt-and-braces for clients that reconnect without cleaning up.
+    """
+    if env is None:
+        env = os.environ
+    return env.get("REAPER_MCP_NO_SUPERSEDE", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _superseded(ppid: int) -> bool:
@@ -128,9 +159,10 @@ def _watch_parent(poll_seconds: float = 3.0, confirmations_required: int = 3) ->
     """
     ppid = os.getppid()
     consecutive_dead = 0
+    check_superseded = supersede_enabled()
     while True:
         time.sleep(poll_seconds)
-        if _superseded(ppid):
+        if check_superseded and _superseded(ppid):
             os._exit(0)
         if _parent_alive(ppid):
             consecutive_dead = 0
