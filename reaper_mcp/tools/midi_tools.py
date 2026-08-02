@@ -224,7 +224,6 @@ def register(mcp: FastMCP):
     # ── CC (Control Change) Operations ───────────────────────
 
     @mcp.tool()
-    @mcp.tool()
     async def midi_insert_program_change(
         track_index: int,
         item_index: int,
