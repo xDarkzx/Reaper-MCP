@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **173 tools across 26 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **180 tools across 26 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,7 +12,7 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 26 | 173 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `full` | 26 | 180 | Default. You're on Claude / GPT-4 / Gemini-class models. |
 | `composition` | 17 | ~130 | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
 | `mixing` | 10 | ~71 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
 | `analysis` | 5 | ~53 | Inspect and measure only. Read-mostly workflow. |
@@ -50,16 +50,16 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Transport](#transport) | `transport_tools.py` | 11 |
 | [Tracks](#tracks) | `track_tools.py` | 18 |
 | [Track Templates](#track-templates) | `template_tools.py` | 4 |
-| [Project](#project) | `project_tools.py` | 13 |
+| [Project](#project) | `project_tools.py` | 18 |
 | [Items](#items) | `item_tools.py` | 14 |
 | [Takes](#takes) | `take_tools.py` | 4 |
-| [MIDI](#midi) | `midi_tools.py` | 13 |
+| [MIDI](#midi) | `midi_tools.py` | 15 |
 | [MIDI Quantize / Humanize](#midi-quantize--humanize) | `quantize_tools.py` | 3 |
 | [Markers & Regions](#markers--regions) | `marker_tools.py` | 7 |
 | [Tempo Map](#tempo-map) | `tempo_tools.py` | 4 |
 | [Envelopes](#envelopes) | `envelope_tools.py` | 3 |
 | [Selection](#selection) | `selection_tools.py` | 9 |
-| [Sends & Routing](#sends--routing) | `send_tools.py` | 7 |
+| [Sends & Routing](#sends--routing) | `send_tools.py` | 8 |
 | [FX](#fx) | `fx_tools.py` | 15 |
 | [FX Inventory](#fx-inventory) | `inventory_tools.py` | 2 |
 | [Mix & Master](#mix--master) | `mix_tools.py` | 3 |
@@ -146,8 +146,12 @@ Project lifecycle, save/load, rendering, undo. Source: `project_tools.py`.
 | `project_export_audio(path, format="wav")` | Render the project to audio. Supported formats: `wav`, `mp3`, `ogg`, `flac`, `aiff`. |
 | `project_undo()` | Undo the last action. |
 | `project_redo()` | Redo the last undone action. |
-| `project_get_notes()` | Get the project's notes field (metadata). |
+| `project_get_notes()` | Get the project's notes field (free-text area). |
 | `project_set_notes(notes)` | Replace the project's notes field. |
+| `project_get_metadata()` | Get project render metadata (title, author, album, genre, etc.) — the fields embedded into rendered file tags (ID3/Vorbis/APE) and render-filename templates. Values are write-only in REAPER's API; returns which fields are set, not their values. |
+| `project_set_metadata(title="", author="", album="", comment="", genre="", year="", track_number="", composer="", isrc="", copyright="")` | Set project render metadata fields. Non-empty fields are written to every tag format REAPER can embed; empty strings leave existing values untouched. |
+| `project_get_notes_info()` | Get the Title/Author fields at the top of Project Settings → Notes tab — distinct from both `project_get_notes` (free-text area) and `project_get_metadata` (render tags). Unlike render metadata, returns actual stored values. |
+| `project_set_notes_info(title="", author="")` | Set the Notes-tab Title/Author fields. At least one must be non-empty; empty strings leave existing values untouched. |
 | `project_set_grid(grid_division)` | Set grid division (e.g., `0.25` = quarter note). |
 
 ## Items
@@ -197,6 +201,8 @@ Note insertion (single + batch), CC events, sorting, metadata. Source: `midi_too
 | `midi_delete_all_notes(item_index)` | Wipe every note in an item (CCs remain). |
 | `midi_insert_cc(item_index, time_qn, cc_num, value, channel=0)` | Insert a CC / pitch-bend / aftertouch event. |
 | `midi_delete_cc(item_index, cc_index)` | Delete a CC event. |
+| `midi_insert_program_change(track_index, item_index, channel, program, position, bank_msb=None, bank_lsb=None)` | Insert a Program Change, optionally preceded by Bank Select — how hardware-emulation plugins switch sounds when the FX preset selector is inert. Bank Select (if given) is written one tick before Program Change so ordering survives `MIDI_Sort`. |
+| `midi_list_programs(track_index)` | List the MIDI program names a track's instrument exposes (`supplier` + `{program, name}` pairs). Whether a plugin honors Program Change is independent of whether it publishes names here — some do one, some the other, some both. |
 | `midi_get_note_names()` | Return a lookup table mapping pitch → note name (C4, D#3, …). |
 | `midi_count_events(item_index)` | Count notes and CCs — cheap substitute for a full read. |
 | `midi_sort(item_index)` | Sort MIDI events by start time (required after bulk inserts). |
@@ -273,12 +279,13 @@ Inter-track sends — aux sends, sidechain feeds, parallel buses. Source: `send_
 
 | Tool | Description |
 |------|-------------|
-| `send_create(source_track, dest_track)` | Create a post-fader send. Returns the new send index. |
+| `send_create(source_track, dest_track, midi_source_channel=None, midi_dest_channel=None)` | Create a post-fader send. Pass both `midi_*_channel` args (0=all, 1-16, 31=disabled) to also route MIDI to a specific channel — e.g. one channel of a multi-timbral VSTi. Returns the new send index. |
 | `send_remove(track_index, send_index)` | Delete a send. |
-| `send_get_all(track_index)` | List every send on a track. |
+| `send_get_all(track_index)` | List every send on a track, including `midi_source_channel`/`midi_dest_channel`/`midi_enabled`. |
 | `send_set_volume(track_index, send_index, volume_db)` | Send level in dB. |
 | `send_set_pan(track_index, send_index, pan)` | Send pan (-1 L → 1 R). |
 | `send_set_mute(track_index, send_index, mute)` | Mute a send. |
+| `send_set_midi_channel(track_index, send_index, midi_source_channel, midi_dest_channel)` | Change MIDI routing on an existing send. 0=all channels, 1-16=specific, 31=disabled on both. |
 | `send_get_routing_diagram()` | ASCII routing diagram for the entire project — great for "show me what's feeding into what". |
 
 ## FX
@@ -297,7 +304,7 @@ Add, remove, configure plugins; read/write parameters; manage presets. Source: `
 | `fx_disable(track_index, fx_index)` | Disable a plugin (bypass). |
 | `fx_show_ui(track_index, fx_index)` | Open the plugin's UI window. |
 | `fx_get_preset(track_index, fx_index)` | Current preset name. |
-| `fx_set_preset(track_index, fx_index, preset_name)` | Load a preset by name. |
+| `fx_set_preset(track_index, fx_index, preset_name, include_params=False)` | Load a preset by name (must match the plugin's exact spelling — some plugins pad to a fixed width; take the name from `fx_get_preset`/`fx_navigate_preset`, not REAPER's `presets/*.ini`, which stores it trimmed). Verifies the preset actually changed and raises if it didn't, instead of reporting success for a silent no-op. Returns the resulting preset, not its parameters, unless `include_params=True`. |
 | `fx_navigate_preset(track_index, fx_index, direction)` | Step next/previous preset (`direction` = -1 or 1). |
 | `fx_get_instrument(track_index)` | Detect which VSTi (if any) is on a track. |
 | `fx_move(track_index, fx_index, new_index)` | Reorder plugins within a chain. |

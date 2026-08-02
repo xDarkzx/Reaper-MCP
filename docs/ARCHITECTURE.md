@@ -58,10 +58,12 @@ Errors and malformed responses trigger typed errors (`ReaperMCPError` with an `E
 
 From `reaper_mcp_shared/constants.py`:
 
-- `MAX_TRACKS = 500` — upper bound on any track index validation.
 - `MAX_COMPOSE_TRACKS = 50` — per `compose_arrangement` / `configure_tracks` call.
 - `MAX_NOTES_PER_TRACK = 10 000`, `MAX_TOTAL_NOTES_PER_CALL = 50 000` — cap single-batch MIDI writes to keep REAPER responsive.
+- `MAX_ANALYSIS_CANDIDATES = 300` (whole-file), `MAX_ANALYSIS_CANDIDATES_PER_REGION = 50` — cap `analyze_silence`/`analyze_peaks`/`analyze_region_qc` candidate lists; a busy or noisy file can produce far more raw detections than anyone would review.
 - Allowed export formats: `wav`, `mp3`, `ogg`, `flac`, `aiff`.
+
+Read-side lookups (individual track/item/FX operations by index) rely on REAPER's own API returning a null handle for an out-of-range index — each handler checks for that and errors cleanly, so there's no separate ceiling constant needed there.
 
 These are intentionally conservative — REAPER's main thread blocks while Lua parses a large JSON payload, so huge calls would stall playback.
 
@@ -175,7 +177,7 @@ reaper_mcp/
 │   └── 00_core.md          # System-prompt instructions injected into the MCP
 │                           #   server's `instructions` field (composition workflow,
 │                           #   BBC Spitfire CC reference, style cheat sheet).
-├── tools/                  # 26 modules, 173 tools (auto-registered)
+├── tools/                  # 26 modules, 180 tools (auto-registered)
 └── mix_engine/             # Detect → clean → EQ → comp → reverb → master pipeline
 
 reaper_mcp_shared/

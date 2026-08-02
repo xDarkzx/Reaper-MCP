@@ -221,11 +221,11 @@ ReaperMCP uses **stdio transport**. Point any MCP-compatible client at the `reap
 
 ### Reducing the tool surface for smaller models
 
-ReaperMCP exposes 173 tools by default. Smaller or cheaper LLMs (Groq Llama 3 caps at 128, Claude Haiku and some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's `env` block to register only a workflow-specific subset:
+ReaperMCP exposes 180 tools by default. Smaller or cheaper LLMs (Groq Llama 3 caps at 128, Claude Haiku and some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's `env` block to register only a workflow-specific subset:
 
 | Profile | Tools | For |
 |---------|------:|-----|
-| `full` *(default)* | ~173 | Claude, GPT-4, Gemini-class models |
+| `full` *(default)* | ~180 | Claude, GPT-4, Gemini-class models |
 | `composition` | ~130 | Writing / editing music (incl. full chop pipeline, batch item/marker edits, ReaScript) |
 | `mixing` | ~71 | Mixing, mastering, bus pipelines |
 | `analysis` | ~53 | Inspect + measure only |
