@@ -67,7 +67,6 @@ ALLOWED_EXPORT_FORMATS = {"wav", "mp3", "ogg", "flac", "aiff"}
 # Hard ceilings for single-call operations. The Lua bridge streams JSON into a
 # string buffer and parses it; very large payloads block REAPER's main thread.
 # Empirically these values keep any one call under ~2 seconds on typical HW.
-MAX_TRACKS = 500                 # Absolute ceiling on track index validation
 MAX_LABEL_LENGTH = 1000          # Track/marker/item name max length
 
 MAX_COMPOSE_TRACKS = 50          # Per `compose_arrangement` / `configure_tracks` call
