@@ -224,6 +224,87 @@ def register(mcp: FastMCP):
     # ── CC (Control Change) Operations ───────────────────────
 
     @mcp.tool()
+    @mcp.tool()
+    async def midi_insert_program_change(
+        track_index: int,
+        item_index: int,
+        channel: int,
+        program: int,
+        position: float,
+        bank_msb: int | None = None,
+        bank_lsb: int | None = None,
+    ) -> dict:
+        """Insert a MIDI Program Change, optionally preceded by Bank Select.
+
+        This is how emulations of classic hardware switch sounds. Their
+        program list is often inert through the FX preset selector while
+        Program Change works — check with midi_list_programs which programs
+        a track offers.
+
+        Bank Select (CC 0 / CC 32) is written before the Program Change when
+        given, one tick apart so the order cannot be reordered away. Omit
+        both for instruments with a single bank.
+
+        Args:
+            track_index: 0-based track index.
+            item_index: MIDI item index.
+            channel: 0-15, 0-based (REAPER's UI shows 1-16).
+            program: 0-127, 0-based (the UI usually shows 1-128).
+            position: Seconds. Place it before the notes it should affect.
+            bank_msb: Optional Bank Select MSB (CC 0), 0-127.
+            bank_lsb: Optional Bank Select LSB (CC 32), 0-127.
+        """
+        if track_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        if channel < 0 or channel > 15:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "Channel must be 0-15")
+        if program < 0 or program > 127:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                "program must be 0-127 (0-based; the UI usually shows 1-128)",
+            )
+        for label, val in (("bank_msb", bank_msb), ("bank_lsb", bank_lsb)):
+            if val is not None and not (0 <= val <= 127):
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE, f"{label} must be 0-127, got {val}"
+                )
+        params = {
+            "track_index": track_index,
+            "item_index": item_index,
+            "channel": channel,
+            "program": program,
+            "position": position,
+        }
+        if bank_msb is not None:
+            params["bank_msb"] = bank_msb
+        if bank_lsb is not None:
+            params["bank_lsb"] = bank_lsb
+        return await client.execute("midi_insert_program_change", **params)
+
+    @mcp.tool()
+    async def midi_list_programs(track_index: int) -> dict:
+        """List the MIDI program names a track's instrument exposes.
+
+        Returns `supplier` (the plugin providing the list, null if none) and
+        `programs` as {program, name} pairs, program numbers 0-based.
+
+        Names come back exactly as the plugin reports them, including any
+        fixed-width padding, so they can be passed straight to fx_set_preset
+        — unlike the names in REAPER's presets/*.ini, which are stored
+        trimmed and will be rejected.
+
+        Whether a plugin honors a Program Change is a separate question from
+        whether it publishes names here; some publish a full list and still
+        only respond to the preset selector, or the other way round.
+
+        Args:
+            track_index: 0-based track index.
+        """
+        if track_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        return await client.execute("midi_list_programs", track_index=track_index)
+
+    @mcp.tool()
     async def midi_insert_cc(
         track_index: int,
         item_index: int,

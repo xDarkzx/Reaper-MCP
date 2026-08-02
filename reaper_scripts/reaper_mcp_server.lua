@@ -2715,6 +2715,106 @@ function midi.midi_delete_all_notes(p)
   return {cleared = true, deleted_count = count}
 end
 
+-- Program Change und Bank Select.
+--
+-- MIDI_InsertCC nimmt den Nachrichtentyp als chanmsg-Parameter; midi_insert_cc
+-- verdrahtet ihn auf 0xB0 (Control Change), sodass Program Change (0xC0) bisher
+-- nicht erreichbar war. Genau der schaltet aber bei Emulationen klassischer
+-- Hardware das Programm um — der Preset-Selector bleibt dort wirkungslos.
+--
+-- Reihenfolge: Bank Select MSB (CC 0) und LSB (CC 32) muessen VOR dem Program
+-- Change liegen, sonst waehlt das Plugin aus der alten Bank. Die drei Events
+-- werden deshalb um je einen Tick gestaffelt. Ein Test auf REAPER 7.78 zeigt
+-- zwar, dass MIDI_Sort die Einfuegereihenfolge auch bei identischer Position
+-- beibehaelt, aber das ist nirgends zugesichert — ein Tick (1/960 Viertel) ist
+-- musikalisch bedeutungslos und macht das Ergebnis unabhaengig davon.
+--
+-- Program Change traegt nur EIN Datenbyte, msg3 bleibt 0. Kanaele und
+-- Programmnummern sind 0-basiert (auf dem Draht), waehrend REAPERs Oberflaeche
+-- ab 1 zaehlt.
+function midi.midi_insert_program_change(p)
+  local it, take, idx, err = get_midi_take(p)
+  if not take then return nil, err end
+  if p.position == nil or p.channel == nil or p.program == nil then
+    return nil, "Missing parameter: position/channel/program"
+  end
+
+  local ch = clamp(math.floor(p.channel), 0, 15)
+  local prog = math.floor(p.program)
+  if prog < 0 or prog > 127 then
+    return nil, "program must be 0-127 (0-based; the UI usually shows 1-128)"
+  end
+
+  local msb, lsb
+  if p.bank_msb ~= nil then
+    msb = math.floor(p.bank_msb)
+    if msb < 0 or msb > 127 then return nil, "bank_msb must be 0-127" end
+  end
+  if p.bank_lsb ~= nil then
+    lsb = math.floor(p.bank_lsb)
+    if lsb < 0 or lsb > 127 then return nil, "bank_lsb must be 0-127" end
+  end
+
+  local ppq = reaper.MIDI_GetPPQPosFromProjTime(take, p.position)
+  local tick = 0
+
+  reaper.Undo_BeginBlock()
+  if msb ~= nil then
+    reaper.MIDI_InsertCC(take, false, false, ppq + tick, 0xB0, ch, 0, msb)
+    tick = tick + 1
+  end
+  if lsb ~= nil then
+    reaper.MIDI_InsertCC(take, false, false, ppq + tick, 0xB0, ch, 32, lsb)
+    tick = tick + 1
+  end
+  reaper.MIDI_InsertCC(take, false, false, ppq + tick, 0xC0, ch, prog, 0)
+  reaper.MIDI_Sort(take)
+  reaper.Undo_EndBlock("MCP: midi_insert_program_change", -1)
+
+  local _, _, ccs = reaper.MIDI_CountEvts(take)
+  return {
+    inserted = {
+      channel = ch,
+      program = prog,
+      bank_msb = msb,
+      bank_lsb = lsb,
+      position = p.position,
+    },
+    total_ccs = ccs,
+  }
+end
+
+-- Programmnamen einer Spur auflisten.
+--
+-- HasTrackMIDIPrograms meldet, welches Plugin die Liste liefert (oder nichts),
+-- EnumTrackMIDIProgramNames die Namen. Beide erwarten den Track-INDEX, nicht
+-- das MediaTrack-Handle. Die Namen kommen so zurueck, wie das Plugin sie fuehrt
+-- — inklusive Padding auf feste Breite — und sind damit direkt als preset_name
+-- fuer fx_set_preset verwendbar.
+function midi.midi_list_programs(p)
+  local tr, idx, err = get_track(p)
+  if not tr then return nil, err end
+
+  local supplier = reaper.HasTrackMIDIPrograms(idx)
+  if supplier == nil or supplier == "" then
+    return {track_index = idx, supplier = nil, count = 0, programs = {}}
+  end
+
+  local programs = {}
+  for pn = 0, 127 do
+    local ok, name = reaper.EnumTrackMIDIProgramNames(idx, pn, "")
+    if not ok then break end
+    programs[#programs + 1] = {program = pn, name = name}
+  end
+
+  return {
+    track_index = idx,
+    supplier = supplier,
+    count = #programs,
+    programs = programs,
+  }
+end
+
 function midi.midi_insert_cc(p)
   local it, take, idx, err = get_midi_take(p)
   if not take then return nil, err end
