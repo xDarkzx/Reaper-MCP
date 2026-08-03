@@ -1,7 +1,5 @@
 """Compose helpers — shared constants and keyword matching for compose tools."""
 
-import json
-import re
 
 
 # ============================================================

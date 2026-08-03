@@ -12,7 +12,7 @@ Key genre differences:
 
 from reaper_mcp.mix_engine.profiles_v2 import (
     StyleProfile, InstrumentRole, SidechainSpec, MasteringChain, ReverbBus, ReverbSend,
-    CompProfile, EQBand, register_profile, DEFAULT_REVERB_BUSES,
+    register_profile, DEFAULT_REVERB_BUSES,
 )
 from reaper_mcp.mix_engine.catalog._shared import (
     kick_edm, snare_edm, hats, perc_bright, sub_bass, mid_bass, bass_808,

@@ -9,10 +9,8 @@ from reaper_mcp.mix_engine.catalog._shared import (
     sub_bass, mid_bass, bass_guitar, bass_808,
     lead_synth, pluck_synth, pad, chord_stab, piano_modern,
     vocal_lead, vocal_backup, vocal_chop,
-    clean_guitar, rhythm_guitar,
-    comp_kick_edm, comp_snare_edm, comp_bass_edm, comp_vocal, comp_lead_synth,
-    comp_pad, comp_master_transparent, comp_master_glue,
-    default_aliases,
+    clean_guitar, comp_kick_edm, comp_snare_edm, comp_bass_edm, comp_vocal, comp_lead_synth,
+    comp_pad, comp_master_transparent, default_aliases,
 )
 
 

@@ -21,7 +21,7 @@ import logging
 
 from reaper_mcp.mix_engine.detect import detect_plugins, PluginSuite
 from reaper_mcp.mix_engine.profiles_v2 import (
-    MasteringChain, EQBand, CompProfile, get_profile,
+    MasteringChain, CompProfile, get_profile,
 )
 
 logger = logging.getLogger(__name__)

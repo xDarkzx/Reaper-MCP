@@ -11,7 +11,6 @@ import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
-from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 logger = logging.getLogger(__name__)
 

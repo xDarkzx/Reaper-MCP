@@ -15,7 +15,7 @@ Auto-detects FabFilter Pro-Q 3 / Pro-C 2 / Pro-R; falls back to REAPER stock
 import json
 import logging
 
-from reaper_mcp.mix_engine.detect import detect_plugins, PluginSuite
+from reaper_mcp.mix_engine.detect import detect_plugins
 from reaper_mcp.mix_engine.plugins import get_plugin_profile
 from reaper_mcp.mix_engine.profiles import (
     VOLUME_STAGING, EQ_PROFILES, COMPRESSION_PROFILES, REVERB_BUSES,

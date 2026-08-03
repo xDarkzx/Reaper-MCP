@@ -84,9 +84,10 @@ def register(mcp: FastMCP):
             tracks: JSON array of track indices e.g. "[0,1,2]", or empty for all.
         """
         import os
+        import tempfile
         backup = await ensure_backup(client)
         # Reset composition state
-        state_path = os.path.join(os.environ.get("TEMP", "/tmp"),
+        state_path = os.path.join(tempfile.gettempdir(),
                                   "reaper_mcp", "composed_tracks.json")
         if tracks:
             # Partial wipe — remove only specified tracks from state
@@ -139,7 +140,8 @@ def register(mcp: FastMCP):
     async def reset_composition() -> dict:
         """Unlock compose_arrangement without deleting MIDI. Use wipe_all_midi to also delete."""
         import os
-        state_path = os.path.join(os.environ.get("TEMP", "/tmp"),
+        import tempfile
+        state_path = os.path.join(tempfile.gettempdir(),
                                   "reaper_mcp", "composed_tracks.json")
         try:
             if os.path.exists(state_path):

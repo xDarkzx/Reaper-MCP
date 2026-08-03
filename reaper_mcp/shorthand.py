@@ -34,7 +34,6 @@ Keyswitches (BBC Spitfire, bottom of keyboard):
   ks:3 = D#-1 (articulation 4 — Tremolo)
 """
 
-import math
 
 _BASE_NOTES = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 
@@ -192,7 +191,6 @@ def _parse_ccs(cc_str: str, t_min: float, t_max: float) -> list[dict]:
     """
     ccs = []
     has_cc11 = False
-    has_dynamics = False
 
     if not cc_str.strip():
         # No CC specified — fast ramp to 100, hold there
@@ -215,7 +213,6 @@ def _parse_ccs(cc_str: str, t_min: float, t_max: float) -> list[dict]:
 
         # Dynamic marking: pp:0-20 or ff:10-30
         if tag in _DYNAMICS:
-            has_dynamics = True
             has_cc11 = True  # dynamics auto-generate CC11
             time_parts = parts[1].split('-')
             t_start = float(time_parts[0])

@@ -12,8 +12,7 @@ from reaper_mcp.mix_engine.catalog._shared import (
     kick_acoustic, snare_acoustic, hats, ride_cymbal,
     upright_bass, bass_guitar, piano_jazz, clean_guitar,
     vocal_jazz, horns_section,
-    comp_jazz_gentle, comp_horns, comp_master_transparent,
-    default_aliases,
+    comp_jazz_gentle, comp_horns, default_aliases,
 )
 
 

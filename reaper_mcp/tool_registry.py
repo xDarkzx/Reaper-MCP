@@ -148,7 +148,7 @@ def register_all_tools(mcp: FastMCP):
             importlib.import_module(f"reaper_mcp.tools.{name}")
         except ModuleNotFoundError:
             truly_missing.append(name)
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # some other problem — already surfaced via failures
     if truly_missing:
         sys.stderr.write(

@@ -6,10 +6,8 @@ from reaper_mcp.mix_engine.profiles_v2 import (
 )
 from reaper_mcp.mix_engine.catalog._shared import (
     kick_edm, snare_edm, hats, perc_bright,
-    sub_bass, bass_808, mid_bass, bass_guitar,
-    lead_synth, pluck_synth, pad, chord_stab, piano_modern,
-    vocal_lead, vocal_chop, riser_fx, impact_fx,
-    comp_kick_edm, comp_snare_edm, comp_bass_edm, comp_vocal, comp_lead_synth,
+    sub_bass, bass_808, mid_bass, lead_synth, pluck_synth, pad, chord_stab, piano_modern,
+    vocal_lead, vocal_chop, riser_fx, comp_kick_edm, comp_snare_edm, comp_bass_edm, comp_vocal, comp_lead_synth,
     comp_pad, comp_master_transparent, comp_master_glue,
     default_aliases,
 )

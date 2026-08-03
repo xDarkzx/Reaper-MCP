@@ -13,7 +13,6 @@ Preferences can be overridden per category by a user JSON file. See
 `load_user_fx_preferences()` for the lookup order.
 """
 
-from dataclasses import dataclass, field
 
 
 # ────────────────────────────────────────────────────────────────

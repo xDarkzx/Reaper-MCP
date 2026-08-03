@@ -12,8 +12,7 @@ from reaper_mcp.mix_engine.profiles_v2 import (
 )
 from reaper_mcp.mix_engine.catalog._shared import (
     kick_acoustic, snare_acoustic, hats, perc_bright,
-    slap_bass, bass_guitar, electric_piano, rhythm_guitar, clean_guitar,
-    strings_section, horns_section, vocal_soul, vocal_backup,
+    slap_bass, bass_guitar, electric_piano, rhythm_guitar, strings_section, horns_section, vocal_soul, vocal_backup,
     comp_funk_punch, comp_soul_vocal, comp_horns, comp_bass_edm,
     comp_master_glue, comp_master_transparent,
     default_aliases,

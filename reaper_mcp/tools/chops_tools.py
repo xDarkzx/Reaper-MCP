@@ -792,7 +792,9 @@ def register(mcp: FastMCP):
         seconds_per_slot_source = seconds_per_slot * playrate
         num_source_slices = max(1, int(source_length / seconds_per_slot_source))
 
-        rng = random.Random(seed) if seed else random.Random()
+        # Creative arrangement randomness, not security-sensitive - seed is
+        # for reproducible output, which rules out the `secrets` module.
+        rng = random.Random(seed) if seed else random.Random()  # noqa: S311
 
         # ────────── Create target track + layer tracks ──────────
         tr_result = await client.execute("track_create", name=target_track_name)
@@ -813,8 +815,8 @@ def register(mcp: FastMCP):
                 lt_idx = int(lt_idx)
                 try:
                     await client.execute("track_set_volume", track_index=lt_idx, volume_db=float(vol_db))
-                except Exception:
-                    pass
+                except Exception:  # noqa: S110
+                    pass  # layer volume is cosmetic - track still gets used at default volume
                 layer_tracks.append({"interval": interval, "track_index": lt_idx, "volume_db": vol_db})
 
         vocal_track_idx = int(src_data.get("track_index", -1))
@@ -848,7 +850,7 @@ def register(mcp: FastMCP):
             base = list(range(num_source_slices))
             if bar_reorder == "permuted":
                 # Seed per-bar so bars differ but overall arrangement is deterministic.
-                bar_rng = random.Random((seed or rng.random()) + bar_idx * 1000)
+                bar_rng = random.Random((seed or rng.random()) + bar_idx * 1000)  # noqa: S311
                 bar_rng.shuffle(base)
             return base
 
@@ -967,7 +969,7 @@ def register(mcp: FastMCP):
                                 "pitch_semis": layer_pitch,
                                 "track_index": layer["track_index"],
                             })
-                        except Exception:
+                        except Exception:  # noqa: S110
                             pass  # layer failure is non-fatal
                 except Exception as e:
                     placements.append({
@@ -984,8 +986,8 @@ def register(mcp: FastMCP):
                     "track_set_mute", track_index=vocal_track_idx, mute=True,
                 )
                 muted_track = True
-            except Exception:
-                pass
+            except Exception:  # noqa: S110
+                pass  # outcome is already captured via muted_track for the return value
 
         main_chops = sum(1 for p in placements if "item_index" in p and p["item_index"] is not None)
 

@@ -10,6 +10,7 @@ These are low-level helpers for AI-driven composition:
 import json
 import logging
 import os
+import tempfile
 import time
 import glob as _glob
 
@@ -103,7 +104,7 @@ def register(mcp: FastMCP):
             tracks: JSON tracks array or shorthand string.
             clear_existing: True to wipe target tracks before inserting.
         """
-        log_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "reaper_mcp", "logs")
+        log_dir = os.path.join(tempfile.gettempdir(), "reaper_mcp", "logs")
         try:
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f"compose_{int(time.time())}.json")
@@ -118,7 +119,7 @@ def register(mcp: FastMCP):
         except OSError as e:
             logger.warning("Could not write compose log: %s", e)
 
-        state_path = os.path.join(os.environ.get("TEMP", "/tmp"), "reaper_mcp", "composed_tracks.json")
+        state_path = os.path.join(tempfile.gettempdir(), "reaper_mcp", "composed_tracks.json")
 
         # Detect shorthand notation (compact format)
         if is_shorthand(tracks):

@@ -40,12 +40,23 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "ruff>=0.15",
 ]
 analysis = [
     "numpy>=1.24",
     "soundfile>=0.12",
     "pyloudnorm>=0.1.1",
 ]
+
+[tool.ruff.lint]
+# Real bugs (F, pyflakes) and real security patterns (S, bandit port) -
+# deliberately excludes E/W (pycodestyle style/formatting).
+select = ["F", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is how pytest tests are written - not a stripped-under-`-O`
+# production risk, since tests never ship or run with -O.
+"tests/*" = ["S101"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["reaper_mcp", "reaper_mcp_shared"]

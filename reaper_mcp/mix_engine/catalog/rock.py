@@ -1,8 +1,8 @@
 """Rock style profiles — 6 subgenres from classic to punk to post-rock."""
 
 from reaper_mcp.mix_engine.profiles_v2 import (
-    StyleProfile, InstrumentRole, SidechainSpec, MasteringChain, ReverbBus, ReverbSend,
-    EQBand, register_profile, DEFAULT_REVERB_BUSES,
+    StyleProfile, InstrumentRole, MasteringChain, ReverbBus, ReverbSend,
+    register_profile, DEFAULT_REVERB_BUSES,
 )
 from reaper_mcp.mix_engine.catalog._shared import (
     kick_acoustic, snare_acoustic, hats, perc_bright, drums_bus,

@@ -20,6 +20,16 @@ pytest tests/ -x -q
 
 All tests must pass before submitting a PR.
 
+## Running lint
+
+```bash
+ruff check .
+```
+
+CI runs this too — it only checks for real bugs (unused/undefined names, etc.) and
+security-relevant patterns, not style or formatting, so it isn't fussy about how you
+write code. Must pass clean before submitting a PR.
+
 ## Adding a new tool
 
 1. Pick the right module in `reaper_mcp/tools/` — or create a new `*_tools.py` file. The tool registry auto-discovers any module that defines `register(mcp)`; helper files without that function are silently skipped.
@@ -127,6 +137,7 @@ this.
 
 - Keep PRs focused on a single change.
 - Include tests for new tools.
+- Make sure all existing tests still pass, and `ruff check .` is clean.
 - Describe what your change does and why.
 - Update `CHANGELOG.md` under the current unreleased section.
 
