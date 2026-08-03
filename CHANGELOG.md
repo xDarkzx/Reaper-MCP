@@ -2,6 +2,18 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [Unreleased]
+
+### CI and Repository Updates
+
+None of this changes the package itself.
+
+- Added `ruff` to CI, scoped to the `F` (real bugs) and `S` (security-relevant patterns) rule categories, not style or formatting. Cleaned up everything it found: 19 dead imports, 1 dead variable, restructured two `__init__.py` files' re-exports to the explicit `X as X` form, documented 4 existing intentional non-fatal exception handlers and 3 seeded-random-for-reproducibility cases that were false positives, and switched 4 temp-file-path spots to the standard `tempfile.gettempdir()`.
+- Branch protection on `main`: merging requires CI to pass and at least one review.
+- Dependabot enabled for Python dependencies and GitHub Actions versions, with automatic security-update PRs and vulnerability alerts.
+- Added `SECURITY.md` and enabled GitHub's private vulnerability reporting.
+- GitHub Actions bumped to their latest majors: `checkout` and `setup-python` to v7, `upload-artifact` to v7, `download-artifact` to v8.
+
 ## [0.6.3] - 2026-08-02
 
 ### Fixed
