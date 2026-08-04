@@ -54,12 +54,23 @@ class Connection:
     # itself. Nothing ever reads this file to kill another process; each
     # server only ever acts on what it reads about itself.
     GENERATION_DIR = os.path.join(IPC_DIR, "generations")
+    # One JSON file per completed command (pass or fail), for after-the-fact
+    # debugging — command.json/response.json get deleted immediately after
+    # each round-trip, so without this there's no record of what was sent
+    # once it's done. Swept for entries older than HISTORY_RETENTION_DAYS.
+    HISTORY_DIR = os.path.join(IPC_DIR, "history")
 
 
 class Timeouts:
     POLL_INTERVAL = 0.05       # 50ms between file checks
     COMMAND = 30.0             # Default timeout for short operations
     LONG_COMMAND = 600.0       # For batch MIDI/FX writes (up to ~500KB payloads)
+
+
+HISTORY_RETENTION_DAYS = 30
+HISTORY_PARAM_PREVIEW_CHARS = 2000  # cap stored params — a huge batch call
+                                     # shouldn't turn the history dir into
+                                     # its own version of the data-dump bug
 
 
 ALLOWED_EXPORT_FORMATS = {"wav", "mp3", "ogg", "flac", "aiff"}

@@ -2,15 +2,20 @@ import asyncio
 import contextlib
 import json
 import os
+import random
 import sys
 import time
+import uuid
 
 if sys.platform == "win32":
     import msvcrt
 else:
     import fcntl
 
-from reaper_mcp_shared.constants import Connection, Timeouts, ensure_private_dir
+from reaper_mcp_shared.constants import (
+    Connection, Timeouts, ensure_private_dir,
+    HISTORY_RETENTION_DAYS, HISTORY_PARAM_PREVIEW_CHARS,
+)
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 # Heartbeat: lock file must be updated within this many seconds
@@ -38,6 +43,87 @@ def _log_slow(command: str, stages: dict) -> None:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} pid={os.getpid()} "
                     f"cmd={command} {parts}\n")
     except OSError:
+        pass
+
+
+# Chance of running the retention sweep on any given archived command, so a
+# long-running server (days/weeks without a restart) still cleans up
+# eventually without needing a dedicated timer thread. Startup also sweeps
+# once unconditionally — see ReaperClient.__init__.
+_SWEEP_PROBABILITY = 1.0 / 200
+
+
+def _sweep_history(max_age_days: float = HISTORY_RETENTION_DAYS) -> None:
+    """Delete archived command entries older than max_age_days.
+
+    Pass or fail, no distinction — retention is purely about age, matching
+    what was asked for: keep everything for review, then let it go after 30
+    days regardless of outcome.
+    """
+    try:
+        cutoff = time.time() - max_age_days * 86400
+        with os.scandir(Connection.HISTORY_DIR) as it:
+            for entry in it:
+                try:
+                    if entry.is_file() and entry.stat().st_mtime < cutoff:
+                        os.remove(entry.path)
+                except OSError:
+                    continue  # another process may have already removed it
+    except FileNotFoundError:
+        pass  # nothing archived yet — nothing to sweep
+    except Exception:
+        pass  # best-effort cleanup — never let this disrupt a real command
+
+
+def _archive_command(command: str, params: dict, success: bool, detail, duration: float) -> None:
+    """Write one record of a completed command for after-the-fact review.
+
+    command.json/response.json are deleted immediately after each
+    round-trip, so without this there's no record of what was sent once
+    it's done — exactly the gap that made today's crash investigation rely
+    entirely on REAPER's own minidumps instead of anything reaper-mcp
+    itself kept. Best-effort: a failure here must never take down the
+    actual command it's archiving.
+    """
+    try:
+        ensure_private_dir(Connection.HISTORY_DIR)
+        params_json = json.dumps(params, default=str)
+        truncated = len(params_json) > HISTORY_PARAM_PREVIEW_CHARS
+        if truncated:
+            params_json = params_json[:HISTORY_PARAM_PREVIEW_CHARS]
+        record = {
+            "id": str(uuid.uuid4()),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "pid": os.getpid(),
+            "command": command,
+            "params_preview": params_json,
+            "params_truncated": truncated,
+            "success": success,
+            "duration_sec": round(duration, 3),
+        }
+        if success:
+            record["result_preview"] = json.dumps(detail, default=str)[:HISTORY_PARAM_PREVIEW_CHARS]
+        else:
+            record["error"] = str(detail)
+
+        # Sortable-by-name filename doubles as a unique ID without needing
+        # to read the file first — matches the "unique identifier + timestamp"
+        # shape asked for.
+        fname = f"{time.time():.6f}_{record['id'][:8]}.json"
+        path = os.path.join(Connection.HISTORY_DIR, fname)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(record, f)
+        os.replace(tmp, path)
+
+        if random.random() < _SWEEP_PROBABILITY:
+            _sweep_history()
+    except Exception:
+        # Deliberately broad, not just OSError — this is a best-effort
+        # telemetry path, and *anything* going wrong here (a bad path, a
+        # json.dumps edge case, whatever) must never take down the real
+        # command it's archiving. Confirmed by test: a null-byte path
+        # raises ValueError, not OSError, so OSError alone wasn't enough.
         pass
 
 
@@ -120,6 +206,8 @@ class ReaperClient:
     def __init__(self):
         self._lock = asyncio.Lock()
         ensure_private_dir(Connection.IPC_DIR)
+        _sweep_history()  # unconditional at startup — catches long-running
+                          # servers between the probabilistic per-command sweeps
 
     def _check_server(self):
         if not os.path.exists(Connection.LOCK_FILE):
@@ -179,20 +267,25 @@ class ReaperClient:
 
     def _send_command(self, command: str, timeout: float, **params) -> dict:
         t_start = time.monotonic()
-        self._check_server()
-        t_checked = time.monotonic()
-        with _ipc_mutex(timeout):
-            t_locked = time.monotonic()
-            result, inner_stages = self._send_command_locked(command, timeout, **params)
-            t_done = time.monotonic()
-        stages = {
-            "check_server": t_checked - t_start,
-            "mutex_wait": t_locked - t_checked,
-            **inner_stages,
-            "total": t_done - t_start,
-        }
-        _log_slow(command, stages)
-        return result
+        try:
+            self._check_server()
+            t_checked = time.monotonic()
+            with _ipc_mutex(timeout):
+                t_locked = time.monotonic()
+                result, inner_stages = self._send_command_locked(command, timeout, **params)
+                t_done = time.monotonic()
+            stages = {
+                "check_server": t_checked - t_start,
+                "mutex_wait": t_locked - t_checked,
+                **inner_stages,
+                "total": t_done - t_start,
+            }
+            _log_slow(command, stages)
+            _archive_command(command, params, True, result, stages["total"])
+            return result
+        except Exception as exc:
+            _archive_command(command, params, False, exc, time.monotonic() - t_start)
+            raise
 
     def _send_command_locked(self, command: str, timeout: float, **params) -> tuple[dict, dict]:
         t0 = time.monotonic()

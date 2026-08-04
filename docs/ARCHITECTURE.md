@@ -33,6 +33,7 @@ The Python server and the Lua bridge communicate through four files in a shared 
 | `command.json` | Python | Next command to execute. Atomic-write via `command.tmp` → `os.replace`. |
 | `response.json` | Lua | Result of the last command. Python deletes it after reading. |
 | `command.tmp` / `response.tmp` | both | Stage files so readers never see a half-written payload. |
+| `history/*.json` | Python | One file per completed command (pass or fail) — see request lifecycle step 8. Not part of the live protocol, purely an after-the-fact audit trail. |
 
 Paths:
 
@@ -51,6 +52,7 @@ Both sides resolve the directory through Python's `tempfile.gettempdir()` and Lu
 5. The client polls for `response.json` every 50 ms, up to the command timeout (30 s normally, 600 s for bulk MIDI / FX writes) — re-checking heartbeat staleness roughly every 2 s during the wait, so a REAPER crash mid-command surfaces well before the full timeout rather than only being caught by step 2's pre-flight check.
 6. The Lua script sees the new `command.json`, dispatches to the named handler, and writes the result.
 7. Python reads the response, deletes it, and returns.
+8. Regardless of outcome, a small record (command, params preview, pass/fail, duration) is archived to `history/` as its own JSON file, since `command.json`/`response.json` themselves are deleted the moment the round-trip finishes — without this there would be no record of what was sent once a command completes. Swept for entries older than 30 days (`HISTORY_RETENTION_DAYS`) on server startup and probabilistically (1 in 200) on each new command, so a long-running server doesn't need a dedicated timer to eventually clean up. Best-effort — archiving failures are swallowed, never propagated to the caller.
 
 Errors and malformed responses trigger typed errors (`ReaperMCPError` with an `ErrorCode`) — never a silent hang.
 
@@ -61,6 +63,7 @@ From `reaper_mcp_shared/constants.py`:
 - `MAX_COMPOSE_TRACKS = 50` — per `compose_arrangement` / `configure_tracks` call.
 - `MAX_NOTES_PER_TRACK = 10 000`, `MAX_TOTAL_NOTES_PER_CALL = 50 000` — cap single-batch MIDI writes to keep REAPER responsive.
 - `MAX_ANALYSIS_CANDIDATES = 300` (whole-file), `MAX_ANALYSIS_CANDIDATES_PER_REGION = 50` — cap `analyze_silence`/`analyze_peaks`/`analyze_region_qc` candidate lists; a busy or noisy file can produce far more raw detections than anyone would review.
+- `HISTORY_RETENTION_DAYS = 30`, `HISTORY_PARAM_PREVIEW_CHARS = 2000` — command-history entries are deleted after 30 days; each entry's stored params/result are capped so one huge batch call doesn't turn the history directory into its own version of the data-dump problem.
 - Allowed export formats: `wav`, `mp3`, `ogg`, `flac`, `aiff`.
 
 Read-side lookups (individual track/item/FX operations by index) rely on REAPER's own API returning a null handle for an out-of-range index — each handler checks for that and errors cleanly, so there's no separate ceiling constant needed there.
