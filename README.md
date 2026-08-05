@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2FxDarkzx%2FReaper-MCP.svg)](https://mcptoplist.com/server/glama%2FxDarkzx%2FReaper-MCP)
+
 <!-- mcp-name: io.github.xDarkzx/reaper-mcp -->
 <h1 align="center">ReaperMCP</h1>
 
