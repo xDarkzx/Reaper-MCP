@@ -40,6 +40,15 @@ file entirely — it lives in the package itself, not this shared temp directory
 committed to git and shared between users, unlike everything in the table above which is private
 and per-machine.
 
+`fx_scan_params` itself is an on-demand fallback, not an automated or proactive tool — it's not
+called as part of any other tool's normal flow, and the AI is only expected to reach for it when
+genuinely unsure of a specific parameter's real range/units, not to "get to know" a plugin in
+general. See the tool's own docstring and
+`docs/superpowers/specs/2026-08-06-vst-param-autoscan-design.md` for the full reasoning: scanning
+only solves parameter *calibration*, not plugin or parameter *semantics*, and semantics turned out
+to be the more important and more common problem to solve for well-documented professional
+plugins — which reasoning already handles without this tool.
+
 Paths:
 
 - **Windows:** `%TEMP%\reaper_mcp` (e.g., `C:\Users\You\AppData\Local\Temp\reaper_mcp`)

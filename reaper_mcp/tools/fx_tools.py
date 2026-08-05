@@ -123,16 +123,29 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def fx_scan_params(track_index: int, fx_index: int) -> dict:
-        """Scan an FX plugin's parameters to learn their range/units/curve shape.
+        """On-demand fallback: sweep a plugin's parameters to learn their real
+        range/units/curve shape, when you're genuinely unsure and about to
+        guess. NOT a general "understand this plugin" tool, and not something
+        to call routinely or proactively on every plugin you touch.
 
-        Sweeps each parameter through its range once and caches the result by
-        plugin name, so repeat scans of the same plugin (even in a different
-        project) return instantly from the on-disk cache instead of touching
-        REAPER again. This is a deliberately separate, explicit tool from
-        fx_get_params — it briefly writes and restores every parameter's
-        value and can take longer on plugins with many parameters, so call
-        it when you need to understand an unfamiliar plugin's behavior, not
-        as part of routine reads.
+        Scope: this answers "what range/units does this specific parameter
+        actually use" (calibration) — nothing more. It does not explain what
+        a parameter *means* or what a plugin is *for*; reasoning about a
+        plugin's purpose and a vaguely-named control ("Character," "Drive")
+        is something you're already equipped to do from general knowledge,
+        the same way you already handle FabFilter without this tool. Reach
+        for fx_scan_params only when that reasoning genuinely isn't enough —
+        e.g. an obscure/freeware plugin with no clear labeling, or a
+        specific parameter whose behavior turned out to be surprising (see
+        docs/superpowers/specs/2026-08-06-vst-param-autoscan-design.md for
+        the reasoning behind this scope).
+
+        Caches the result by plugin name, so repeat scans of the same plugin
+        (even in a different project) return instantly from the on-disk
+        cache instead of touching REAPER again. Briefly writes and restores
+        every parameter's value during the sweep, and can take longer on
+        plugins with many parameters — another reason this is deliberately
+        separate from fx_get_params rather than folded into routine reads.
 
         Args:
             track_index: 0-based track index.
