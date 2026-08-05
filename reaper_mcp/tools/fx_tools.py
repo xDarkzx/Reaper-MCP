@@ -144,7 +144,7 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
 
         chain = await client.execute("fx_get_chain", track_index=track_index)
-        fx_list = chain.get("fx_chain", [])
+        fx_list = chain.get("data", {}).get("fx_chain", [])
         if not 0 <= fx_index < len(fx_list):
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index out of range for this track")
         plugin_name = fx_list[fx_index]["name"]
@@ -156,8 +156,9 @@ def register(mcp: FastMCP):
         result = await client.execute_long(
             "fx_scan_params", track_index=track_index, fx_index=fx_index, max_params=MAX_SCAN_PARAMS,
         )
+        scan_data = result.get("data", {})
         params = []
-        for entry in result.get("params", []):
+        for entry in scan_data.get("params", []):
             curve, unit = infer_curve(entry["samples"])
             params.append({
                 "index": entry["index"],
@@ -166,7 +167,7 @@ def register(mcp: FastMCP):
                 "inferred_curve": curve,
                 "inferred_unit": unit,
             })
-        truncated = bool(result.get("truncated", False))
+        truncated = bool(scan_data.get("truncated", False))
         save_cached_map(plugin_name, params, truncated)
         return {
             "plugin_name": plugin_name,

@@ -1,0 +1,216 @@
+{
+  "plugin_name": "VST: ReaEQ (Cockos)",
+  "scanned_at": "2026-08-06T08:43:32",
+  "truncated": false,
+  "params": [
+    {
+      "index": 0,
+      "name": "Freq-Low Shelf",
+      "samples": [
+        "20.0 Hz",
+        "1160.5 Hz",
+        "24000.0 Hz"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "Hz"
+    },
+    {
+      "index": 1,
+      "name": "Gain-Low Shelf",
+      "samples": [
+        "-150.0 dB",
+        "6.0 dB",
+        "12.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 2,
+      "name": "BW-Low Shelf",
+      "samples": [
+        "0.00",
+        "2.00",
+        "4.00"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": ""
+    },
+    {
+      "index": 3,
+      "name": "Freq-Band 2",
+      "samples": [
+        "20.0 Hz",
+        "1160.5 Hz",
+        "24000.0 Hz"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "Hz"
+    },
+    {
+      "index": 4,
+      "name": "Gain-Band 2",
+      "samples": [
+        "-150.0 dB",
+        "6.0 dB",
+        "12.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 5,
+      "name": "BW-Band 2",
+      "samples": [
+        "0.00",
+        "2.00",
+        "4.00"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": ""
+    },
+    {
+      "index": 6,
+      "name": "Freq-Band 3",
+      "samples": [
+        "20.0 Hz",
+        "1160.5 Hz",
+        "24000.0 Hz"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "Hz"
+    },
+    {
+      "index": 7,
+      "name": "Gain-Band 3",
+      "samples": [
+        "-150.0 dB",
+        "6.0 dB",
+        "12.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 8,
+      "name": "BW-Band 3",
+      "samples": [
+        "0.00",
+        "2.00",
+        "4.00"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": ""
+    },
+    {
+      "index": 9,
+      "name": "Freq-High Shelf 4",
+      "samples": [
+        "20.0 Hz",
+        "1160.5 Hz",
+        "24000.0 Hz"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "Hz"
+    },
+    {
+      "index": 10,
+      "name": "Gain-High Shelf 4",
+      "samples": [
+        "-150.0 dB",
+        "6.0 dB",
+        "12.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 11,
+      "name": "BW-High Shelf 4",
+      "samples": [
+        "0.00",
+        "2.00",
+        "4.00"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": ""
+    },
+    {
+      "index": 12,
+      "name": "Freq-High Pass 5",
+      "samples": [
+        "20.0 Hz",
+        "1160.5 Hz",
+        "24000.0 Hz"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "Hz"
+    },
+    {
+      "index": 13,
+      "name": "Gain-High Pass 5",
+      "samples": [
+        "-150.0 dB",
+        "6.0 dB",
+        "12.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 14,
+      "name": "BW-High Pass 5",
+      "samples": [
+        "0.00",
+        "2.00",
+        "4.00"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": ""
+    },
+    {
+      "index": 15,
+      "name": "Global Gain",
+      "samples": [
+        "-150.0 dB",
+        "-6.0 dB",
+        "0.0 dB"
+      ],
+      "inferred_curve": "unknown",
+      "inferred_unit": "dB"
+    },
+    {
+      "index": 16,
+      "name": "Bypass",
+      "samples": [
+        "normal",
+        "bypassed",
+        "bypassed"
+      ],
+      "inferred_curve": "stepped",
+      "inferred_unit": null
+    },
+    {
+      "index": 17,
+      "name": "Wet",
+      "samples": [
+        "0%",
+        "50%",
+        "100%"
+      ],
+      "inferred_curve": "linear",
+      "inferred_unit": "%"
+    },
+    {
+      "index": 18,
+      "name": "Delta",
+      "samples": [
+        "normal",
+        "normal",
+        "enabled"
+      ],
+      "inferred_curve": "stepped",
+      "inferred_unit": null
+    }
+  ]
+}
