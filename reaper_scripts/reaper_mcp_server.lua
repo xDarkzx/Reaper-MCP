@@ -1362,6 +1362,45 @@ function fx.fx_set_param_by_name(p)
   return {param_index = found, name = pname, value = val, display = fmt, fx_name = fx_name}
 end
 
+function fx.fx_scan_params(p)
+  local tr, idx, err = get_track(p)
+  if not tr then return nil, err end
+  if not p.fx_index then return nil, "Missing parameter: fx_index" end
+  local fi = math.floor(p.fx_index)
+  local max_params = p.max_params or 200
+
+  local num = reaper.TrackFX_GetNumParams(tr, fi)
+  local truncated = false
+  local limit = num
+  if num > max_params then
+    limit = max_params
+    truncated = true
+  end
+
+  local params = {}
+  local points = {0.0, 0.5, 1.0}
+  for i = 0, limit - 1 do
+    local _, pname = reaper.TrackFX_GetParamName(tr, fi, i, "")
+    local orig_val = reaper.TrackFX_GetParam(tr, fi, i)
+    local is_midi_cc = pname:find("^MIDI CC")
+    local skip = (pname == "-" and orig_val == 0) or is_midi_cc
+    if not skip then
+      local samples = {}
+      for _, pt in ipairs(points) do
+        reaper.TrackFX_SetParam(tr, fi, i, pt)
+        local val = reaper.TrackFX_GetParam(tr, fi, i)
+        local _, fmt = reaper.TrackFX_FormatParamValue(tr, fi, i, val, "")
+        samples[#samples + 1] = fmt
+      end
+      reaper.TrackFX_SetParam(tr, fi, i, orig_val)
+      params[#params + 1] = {index = i, name = pname, samples = samples}
+    end
+  end
+
+  local _, fx_name = reaper.TrackFX_GetFXName(tr, fi, "")
+  return {fx_name = fx_name, truncated = truncated, params = params}
+end
+
 function fx.fx_enable(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
