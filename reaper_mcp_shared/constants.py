@@ -75,6 +75,13 @@ HISTORY_PARAM_PREVIEW_CHARS = 2000  # cap stored params — a huge batch call
 
 ALLOWED_EXPORT_FORMATS = {"wav", "mp3", "ogg", "flac", "aiff"}
 
+# Cache of scanned VST/AU parameter behavior (units, curve shape), keyed by
+# plugin name. Deliberately NOT under Connection.IPC_DIR (private, 0700,
+# per-machine) — these files are meant to be committed and shared, so a plain
+# world-readable directory under the package is correct here.
+PLUGIN_MAP_DIR = os.path.join(os.path.dirname(__file__), "plugin_maps")
+MAX_SCAN_PARAMS = 200  # cap per fx_scan_params call — mirrors MAX_ANALYSIS_CANDIDATES's purpose
+
 # Hard ceilings for single-call operations. The Lua bridge streams JSON into a
 # string buffer and parses it; very large payloads block REAPER's main thread.
 # Empirically these values keep any one call under ~2 seconds on typical HW.
