@@ -1,5 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
+from reaper_mcp_shared.constants import MAX_SCAN_PARAMS
+from reaper_mcp_shared.plugin_cache import infer_curve, load_cached_map, save_cached_map
 
 
 def register(mcp: FastMCP):
@@ -118,6 +120,60 @@ def register(mcp: FastMCP):
             track_index=track_index, fx_index=fx_index,
             param_name=param_name, value=value,
         )
+
+    @mcp.tool()
+    async def fx_scan_params(track_index: int, fx_index: int) -> dict:
+        """Scan an FX plugin's parameters to learn their range/units/curve shape.
+
+        Sweeps each parameter through its range once and caches the result by
+        plugin name, so repeat scans of the same plugin (even in a different
+        project) return instantly from the on-disk cache instead of touching
+        REAPER again. This is a deliberately separate, explicit tool from
+        fx_get_params — it briefly writes and restores every parameter's
+        value and can take longer on plugins with many parameters, so call
+        it when you need to understand an unfamiliar plugin's behavior, not
+        as part of routine reads.
+
+        Args:
+            track_index: 0-based track index.
+            fx_index: 0-based FX chain index.
+        """
+        if track_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        if fx_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
+
+        chain = await client.execute("fx_get_chain", track_index=track_index)
+        fx_list = chain.get("fx_chain", [])
+        if not 0 <= fx_index < len(fx_list):
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index out of range for this track")
+        plugin_name = fx_list[fx_index]["name"]
+
+        cached = load_cached_map(plugin_name)
+        if cached is not None:
+            return {**cached, "from_cache": True}
+
+        result = await client.execute_long(
+            "fx_scan_params", track_index=track_index, fx_index=fx_index, max_params=MAX_SCAN_PARAMS,
+        )
+        params = []
+        for entry in result.get("params", []):
+            curve, unit = infer_curve(entry["samples"])
+            params.append({
+                "index": entry["index"],
+                "name": entry["name"],
+                "samples": entry["samples"],
+                "inferred_curve": curve,
+                "inferred_unit": unit,
+            })
+        truncated = bool(result.get("truncated", False))
+        save_cached_map(plugin_name, params, truncated)
+        return {
+            "plugin_name": plugin_name,
+            "truncated": truncated,
+            "params": params,
+            "from_cache": False,
+        }
 
     @mcp.tool()
     async def fx_enable(track_index: int, fx_index: int) -> dict:

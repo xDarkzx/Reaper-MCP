@@ -35,6 +35,11 @@ The Python server and the Lua bridge communicate through four files in a shared 
 | `command.tmp` / `response.tmp` | both | Stage files so readers never see a half-written payload. |
 | `history/*.json` | Python | One file per completed command (pass or fail) — see request lifecycle step 8. Not part of the live protocol, purely an after-the-fact audit trail. |
 
+Note: `reaper_mcp_shared/plugin_maps/*.json` (the `fx_scan_params` cache) is a different kind of
+file entirely — it lives in the package itself, not this shared temp directory, and is meant to be
+committed to git and shared between users, unlike everything in the table above which is private
+and per-machine.
+
 Paths:
 
 - **Windows:** `%TEMP%\reaper_mcp` (e.g., `C:\Users\You\AppData\Local\Temp\reaper_mcp`)
@@ -180,13 +185,16 @@ reaper_mcp/
 │   └── 00_core.md          # System-prompt instructions injected into the MCP
 │                           #   server's `instructions` field (composition workflow,
 │                           #   BBC Spitfire CC reference, style cheat sheet).
-├── tools/                  # 26 modules, 180 tools (auto-registered)
+├── tools/                  # 26 modules, 181 tools (auto-registered)
 └── mix_engine/             # Detect → clean → EQ → comp → reverb → master pipeline
 
 reaper_mcp_shared/
 ├── constants.py            # IPC paths, timeouts, safety limits
 ├── error_codes.py          # Typed error codes (ReaperMCPError + ErrorCode enum)
-└── protocol.py             # Command / response formatting helpers
+├── protocol.py             # Command / response formatting helpers
+├── plugin_cache.py         # fx_scan_params cache: curve inference, load/save
+└── plugin_maps/            # Cached VST/AU param scans, one JSON file per plugin —
+                             #   git-tracked and shareable, NOT the private IPC dir
 
 reaper_scripts/
 └── reaper_mcp_server.lua   # Lua IPC bridge (runs inside REAPER)
