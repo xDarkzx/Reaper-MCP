@@ -4,6 +4,29 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fx_scan_params` only sampled 3 fixed points (0.0/0.5/1.0), which is
+  useless for stepped/categorical parameters** like Pro-Q 3's "Shape"
+  dropdown (~8 real values: Bell, Low Shelf, Low Cut, High Shelf, High
+  Cut, Notch, Band Pass, Flat Tilt) — only ever revealing 3 of them and
+  forcing manual binary-search guessing for the rest, a real, reported
+  pain point. Now uses REAPER's own `TrackFX_GetParameterStepCount` to
+  detect genuinely stepped parameters and sample *every* discrete value
+  exactly, and samples continuous parameters (Frequency, Gain, etc.) at
+  9 points instead of 3 for meaningfully better interpolation precision.
+  Each sample now also reports its exact normalized value alongside the
+  formatted display string, not just the display string alone.
+  `infer_curve` (in `reaper_mcp_shared/plugin_cache.py`) now trusts
+  REAPER's step-count signal directly instead of guessing from sample
+  patterns, and works with however many points were actually sampled
+  (was hardcoded to exactly 3).
+- The per-machine VST/AU parameter scan cache (`reaper_mcp_shared/
+  plugin_maps/`) was never gitignored — a real risk of accidentally
+  shipping one machine's specific-plugin-version scan results to every
+  other user. Now ignored; deleted the one stale (old 3-point-sampling
+  format) cache file already present.
+
 ## [0.6.4] - 2026-08-12
 
 ### Fixed

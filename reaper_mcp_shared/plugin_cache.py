@@ -39,20 +39,39 @@ def _normalize(num: float, unit: str):
     return num, unit
 
 
-def infer_curve(samples: list) -> tuple:
-    """Infer a parameter's curve shape from 3 display strings sampled at
-    normalized 0.0, 0.5, and 1.0.
+def infer_curve(samples: list, step_count: int | None = None) -> tuple:
+    """Infer a parameter's curve shape from its sampled points.
+
+    `samples` is a list of either plain formatted-display strings (older
+    shape) or {"normalized": float, "formatted": str} dicts (current Lua
+    handler output) — either works, since only the formatted string is
+    used here for classification.
+
+    `step_count` is REAPER's own TrackFX_GetParameterStepCount for this
+    param, when available: a positive value means REAPER itself reports
+    this as a genuinely discrete/stepped parameter, which settles the
+    classification directly instead of guessing from string patterns —
+    the guess-based path below is a fallback for when that API doesn't
+    give a definitive answer (step_count is None or 0, e.g. a boolean
+    toggle, which the non-numeric-string check below still catches).
 
     Returns (curve_type, unit) where curve_type is one of "linear",
     "logarithmic", "stepped", or "unknown". "unknown" is a valid, expected
-    outcome (e.g. a constant-value param) — not an error.
-    """
-    parsed = [_parse_numeric(s) for s in samples]
+    outcome (e.g. a constant-value param) — not an error. Works with
+    however many points were actually sampled (previously hardcoded to
+    exactly 3 — real params can now be sampled far more densely, e.g.
+    every discrete step of a stepped param, or 9 points for continuous
+    ones)."""
+    if step_count is not None and step_count > 0:
+        return "stepped", None
+
+    formatted = [s["formatted"] if isinstance(s, dict) else s for s in samples]
+    parsed = [_parse_numeric(s) for s in formatted]
     numeric_count = sum(1 for num, _ in parsed if num is not None)
 
     if numeric_count == 0:
         return "stepped", None
-    if numeric_count < len(samples):
+    if numeric_count < len(formatted):
         return "unknown", None
 
     normalized = [_normalize(num, unit) for num, unit in parsed]
@@ -60,21 +79,17 @@ def infer_curve(samples: list) -> tuple:
     units = [u for _, u in normalized]
     unit = units[0] if len(set(units)) == 1 else None
 
-    v0, v1, v2 = values
-    if v0 == v1 == v2:
+    if len(set(values)) == 1:
         return "unknown", unit
 
-    diff1 = v1 - v0
-    diff2 = v2 - v1
-    span = abs(v2 - v0) or 1.0
-
-    if abs(diff1 - diff2) <= 0.15 * span:
+    diffs = [values[i + 1] - values[i] for i in range(len(values) - 1)]
+    span = abs(values[-1] - values[0]) or 1.0
+    if max(diffs) - min(diffs) <= 0.15 * span:
         return "linear", unit
 
-    if v0 != 0 and v1 != 0:
-        ratio1 = v1 / v0
-        ratio2 = v2 / v1
-        if ratio1 > 0 and ratio2 > 0 and abs(ratio1 - ratio2) <= 0.15 * max(ratio1, ratio2):
+    if all(v != 0 for v in values[:-1]):
+        ratios = [values[i + 1] / values[i] for i in range(len(values) - 1)]
+        if all(r > 0 for r in ratios) and max(ratios) - min(ratios) <= 0.15 * max(ratios):
             return "logarithmic", unit
 
     return "unknown", unit

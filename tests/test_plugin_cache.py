@@ -62,6 +62,44 @@ class TestInferCurve:
         curve, unit = infer_curve(["0 dB", "0 dB", "0 dB"])
         assert curve == "unknown"
 
+    def test_positive_step_count_is_stepped_regardless_of_samples(self):
+        # Regression test: REAPER's own TrackFX_GetParameterStepCount is a
+        # ground-truth signal, not a guess - it must win even if the
+        # sampled strings would otherwise look numeric/continuous.
+        curve, unit = infer_curve(["20 Hz", "632 Hz", "20 kHz"], step_count=7)
+        assert curve == "stepped"
+        assert unit is None
+
+    def test_zero_step_count_falls_back_to_pattern_inference(self):
+        # step_count=0 (REAPER's boolean-toggle convention) isn't treated
+        # as a definitive "not stepped" signal - falls through to the
+        # same string-pattern check as step_count=None.
+        curve, unit = infer_curve(["Off", "On", "On"], step_count=0)
+        assert curve == "stepped"
+
+    def test_dict_shaped_samples_use_formatted_field(self):
+        # Current Lua handler output shape: {"normalized": float,
+        # "formatted": str} instead of a plain string - must work
+        # identically to the plain-string shape for classification.
+        samples = [
+            {"normalized": 0.0, "formatted": "20 Hz"},
+            {"normalized": 0.5, "formatted": "632 Hz"},
+            {"normalized": 1.0, "formatted": "20 kHz"},
+        ]
+        curve, unit = infer_curve(samples)
+        assert curve == "logarithmic"
+        assert unit == "Hz"
+
+    def test_nine_point_dense_sampling_still_classifies_correctly(self):
+        # Regression test: was hardcoded to unpack exactly 3 values
+        # (v0, v1, v2 = values) - would crash on any other length. The
+        # denser continuous-param sweep (9 points) must work too.
+        samples = ["0 %", "12.5 %", "25 %", "37.5 %", "50 %",
+                   "62.5 %", "75 %", "87.5 %", "100 %"]
+        curve, unit = infer_curve(samples)
+        assert curve == "linear"
+        assert unit == "%"
+
 
 import pytest
 

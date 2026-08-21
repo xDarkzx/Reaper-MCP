@@ -172,11 +172,13 @@ def register(mcp: FastMCP):
         scan_data = result.get("data", {})
         params = []
         for entry in scan_data.get("params", []):
-            curve, unit = infer_curve(entry["samples"])
+            step_count = entry.get("step_count")
+            curve, unit = infer_curve(entry["samples"], step_count)
             params.append({
                 "index": entry["index"],
                 "name": entry["name"],
                 "samples": entry["samples"],
+                "step_count": step_count,
                 "inferred_curve": curve,
                 "inferred_unit": unit,
             })

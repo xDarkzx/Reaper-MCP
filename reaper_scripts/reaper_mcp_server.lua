@@ -1378,22 +1378,47 @@ function fx.fx_scan_params(p)
   end
 
   local params = {}
-  local points = {0.0, 0.5, 1.0}
+  -- Fixed 3-point sampling (0/0.5/1.0) is fine for continuous params but
+  -- silently useless for stepped/categorical ones (e.g. Pro-Q 3's "Shape"
+  -- dropdown has ~8 real values - Bell/Low Shelf/Low Cut/High Shelf/
+  -- High Cut/Notch/Band Pass/Flat Tilt - and 3 samples only ever reveals
+  -- 3 of them, forcing a caller into manual binary-search guessing for
+  -- the rest, a real, reported pain point). REAPER's own
+  -- TrackFX_GetParameterStepCount tells us exactly how many discrete
+  -- values a stepped param has - step_count is the count of increments
+  -- BETWEEN values (REAPER's own documented convention), so a param
+  -- with step_count=7 has 8 real values at s/7 for s=0..7. Sampling
+  -- every one of them gives an exact, complete map instead of a guess.
+  -- Continuous params (step_count <= 0) get a denser 9-point sweep
+  -- instead of 3, for better interpolation precision on things like
+  -- Frequency without needing a hand-built lookup table.
+  local DENSE_CONTINUOUS_POINTS = {0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0}
+  local MAX_STEP_SAMPLES = 32 -- sanity ceiling, well above any real dropdown's size
   for i = 0, limit - 1 do
     local _, pname = reaper.TrackFX_GetParamName(tr, fi, i, "")
     local orig_val = reaper.TrackFX_GetParam(tr, fi, i)
     local is_midi_cc = pname:find("^MIDI CC")
     local skip = (pname == "-" and orig_val == 0) or is_midi_cc
     if not skip then
+      local points
+      local step_count = reaper.TrackFX_GetParameterStepCount(tr, fi, i)
+      if step_count and step_count > 0 and step_count <= MAX_STEP_SAMPLES then
+        points = {}
+        for s = 0, step_count do
+          points[#points + 1] = s / step_count
+        end
+      else
+        points = DENSE_CONTINUOUS_POINTS
+      end
       local samples = {}
       for _, pt in ipairs(points) do
         reaper.TrackFX_SetParam(tr, fi, i, pt)
         local val = reaper.TrackFX_GetParam(tr, fi, i)
         local _, fmt = reaper.TrackFX_FormatParamValue(tr, fi, i, val, "")
-        samples[#samples + 1] = fmt
+        samples[#samples + 1] = {normalized = pt, formatted = fmt}
       end
       reaper.TrackFX_SetParam(tr, fi, i, orig_val)
-      params[#params + 1] = {index = i, name = pname, samples = samples}
+      params[#params + 1] = {index = i, name = pname, samples = samples, step_count = step_count}
     end
   end
 

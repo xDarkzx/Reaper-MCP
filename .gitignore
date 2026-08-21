@@ -12,6 +12,12 @@ venv/
 .venv/
 env/
 
+# Per-machine VST/AU parameter scan cache (fx_scan_params) - tied to
+# whatever plugin versions are actually installed locally; shipping one
+# machine's scan results to everyone else risks distributing a stale
+# mapping for a plugin version they don't even have.
+reaper_mcp_shared/plugin_maps/
+
 # IDE
 .vscode/
 .idea/
@@ -43,6 +49,9 @@ datasets/
 midi_output/
 librescore_midi/
 dl-librescore/
+
+# Local scratch notes — future ideas not yet designed/committed to
+docs/FUTURE_IDEAS.md
 
 # Local screenshots and scratch files (root-level only)
 /Screenshot*.png
