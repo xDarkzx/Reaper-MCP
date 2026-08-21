@@ -71,7 +71,7 @@ def _sweep_history(max_age_days: float = HISTORY_RETENTION_DAYS) -> None:
                     continue  # another process may have already removed it
     except FileNotFoundError:
         pass  # nothing archived yet — nothing to sweep
-    except Exception:
+    except Exception:  # noqa: S110 - best-effort cleanup, see comment above
         pass  # best-effort cleanup — never let this disrupt a real command
 
 
@@ -116,9 +116,9 @@ def _archive_command(command: str, params: dict, success: bool, detail, duration
             json.dump(record, f)
         os.replace(tmp, path)
 
-        if random.random() < _SWEEP_PROBABILITY:
+        if random.random() < _SWEEP_PROBABILITY:  # noqa: S311 - sampling a maintenance sweep, not cryptographic
             _sweep_history()
-    except Exception:
+    except Exception:  # noqa: S110 - deliberately broad, see comment below
         # Deliberately broad, not just OSError — this is a best-effort
         # telemetry path, and *anything* going wrong here (a bad path, a
         # json.dumps edge case, whatever) must never take down the real

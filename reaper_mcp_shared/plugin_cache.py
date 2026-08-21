@@ -106,5 +106,5 @@ def save_cached_map(plugin_name: str, params: list, truncated: bool) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2)
         os.replace(tmp, path)
-    except Exception:
+    except Exception:  # noqa: S110 - best-effort cache write, see docstring
         pass
