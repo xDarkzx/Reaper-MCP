@@ -4,6 +4,15 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`fx_set_params_batch`**: set many FX parameters (any mix of tracks/FX)
+  in one round-trip instead of one call per parameter — a real, reported
+  cost at scale (setting up a single EQ band properly is 4-5 separate
+  calls today; a handful of bands across a few tracks adds up to 40-60).
+  Each item in the batch is independent and fails on its own — one bad
+  item doesn't abort the rest.
+
 ### Fixed
 
 - **`fx_scan_params` only sampled 3 fixed points (0.0/0.5/1.0), which is

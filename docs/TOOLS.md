@@ -300,6 +300,7 @@ Add, remove, configure plugins; read/write parameters; manage presets. Source: `
 | `fx_get_params(track_index, fx_index)` | All parameters of a plugin (index, name, value, min/max). |
 | `fx_set_param(track_index, fx_index, param_index, value)` | Set a parameter by index. |
 | `fx_set_param_by_name(track_index, fx_index, param_name, value)` | Set a parameter by name (fuzzy match). |
+| `fx_set_params_batch(params)` | Set many parameters (any mix of tracks/FX) in one round-trip instead of one call each — `params` is a JSON array of `{track_index, fx_index, value, param_index}` or `{..., param_name}` objects. Each item fails independently; check the response's `fail_count`, not just that the call itself succeeded. |
 | `fx_enable(track_index, fx_index)` | Enable a plugin. |
 | `fx_disable(track_index, fx_index)` | Disable a plugin (bypass). |
 | `fx_show_ui(track_index, fx_index)` | Open the plugin's UI window. |

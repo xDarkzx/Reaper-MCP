@@ -90,6 +90,7 @@ MAX_LABEL_LENGTH = 1000          # Track/marker/item name max length
 MAX_COMPOSE_TRACKS = 50          # Per `compose_arrangement` / `configure_tracks` call
 MAX_NOTES_PER_TRACK = 10000      # Per-track limit on notes in a single batch insert
 MAX_TOTAL_NOTES_PER_CALL = 50000 # Sum of notes across all tracks in one call
+MAX_PARAMS_PER_BATCH = 500       # Per `fx_set_params_batch` call - well above any real FX-chain-setup batch
 
 # Read-side context-size caps — distinct purpose from the write-side limits
 # above (those protect REAPER's main thread; these protect the calling
