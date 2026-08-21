@@ -461,3 +461,7 @@ Your support helps keep this project maintained and free for everyone.
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 Built by [Daniel Hodgetts](https://github.com/xDarkzx) &bull; [𝕏 @daehonz1](https://x.com/daehonz1)
+
+---
+
+Need a custom tool, plugin, or integration built like this? I take on select engineering projects — come find me on the [Discord](https://discord.gg/BGn8Ujh37m) and leave a message, or open an issue here.

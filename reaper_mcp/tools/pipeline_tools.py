@@ -19,6 +19,24 @@ from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 logger = logging.getLogger(__name__)
 
 
+def compute_items_extent(items: list[dict]) -> tuple[float | None, float]:
+    """Given a flat list of item dicts (as returned by item_get_all, each
+    with `position`/`length`), returns (min_start, max_end) covering all of
+    them - min_start is None if `items` is empty. Extracted as a pure
+    function (not inlined in bounce_stems) so it's directly unit-testable
+    without needing to mock the REAPER IPC client at all."""
+    min_start = None
+    max_end = 0.0
+    for it in items:
+        start = it["position"]
+        end = start + it["length"]
+        if min_start is None or start < min_start:
+            min_start = start
+        if end > max_end:
+            max_end = end
+    return min_start, max_end
+
+
 def register(mcp: FastMCP):
     from reaper_mcp.main import client
     from reaper_mcp.mix_engine.detect import detect_plugins
@@ -309,6 +327,28 @@ def register(mcp: FastMCP):
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER,
                                  "track_indices must be a non-empty array")
 
+        # Action 40892's real REAPER name is "Track: Render tracks to stereo
+        # stem tracks, obeying time selection" - a real, confirmed bug this
+        # closes: with no active time selection (or a stale one left over
+        # from something unrelated), the render can come back silent/blank
+        # even though the new stem tracks and item are created. Computing
+        # the actual extent of the source tracks' own items and setting
+        # that as the time selection first means the render always covers
+        # the real content, regardless of whatever time selection happened
+        # to be active before this was called.
+        all_items = []
+        for ti in src_list:
+            items_result = await client.execute("item_get_all", track_index=int(ti))
+            items_payload = items_result.get("data", items_result)
+            all_items.extend(items_payload.get("items", []))
+        min_start, max_end = compute_items_extent(all_items)
+        if min_start is None:
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                "None of the given tracks have any items to render",
+            )
+        await client.execute("selection_set_time", start=min_start, end=max_end)
+
         # Deselect all, then additively select each target track
         await client.execute("selection_deselect_all_tracks")
         for ti in src_list:
@@ -320,5 +360,6 @@ def register(mcp: FastMCP):
         return {
             "success": True,
             "tracks_stemmed": len(src_list),
+            "render_range": {"start": min_start, "end": max_end},
             "action_result": result,
         }

@@ -129,7 +129,20 @@ if ! $PYTHON -m pip --version &> /dev/null; then
     fi
 fi
 
-# Install from local directory (not on PyPI yet).
+# This project's PyPI package name changed twice (reaper-mcp ->
+# reapermcp -> xdarkzx-reaper-mcp) while the console command stayed
+# "reaper-mcp" throughout - pip does not treat a package-name change as
+# an upgrade of the same project, so a machine that already had an
+# old-named install present can end up with a broken, half-replaced
+# "reaper-mcp" launcher script that invokes the wrong code entirely (a
+# real, confirmed incident, not a hypothetical). Uninstalling any old
+# name first guarantees this install starts from a clean slate
+# regardless of what was here before.
+$PYTHON -m pip uninstall -y reaper-mcp reapermcp >/dev/null 2>&1 || true
+
+# Install from local directory in editable mode, so tool changes in this
+# checkout take effect without reinstalling - not because the package
+# isn't on PyPI (it is, as xdarkzx-reaper-mcp).
 # Many modern Pythons (Homebrew on macOS, Debian/Ubuntu, Fedora) ship with
 # PEP 668 "externally-managed" protection that blocks global pip installs.
 # Try a normal install first; if it fails with that error, retry with --user.

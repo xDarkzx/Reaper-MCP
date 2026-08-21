@@ -4,6 +4,40 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-12
+
+### Fixed
+
+- **`bounce_stems` could render silent/blank stems** — a real, confirmed
+  incident, not a hypothetical. Its underlying REAPER action (40892) is
+  actually named "Track: Render tracks to stereo stem tracks, obeying time
+  selection" — with no active time selection (or a stale one left over
+  from something unrelated), the render can come back blank even though
+  the new stem tracks and audio items are created. `bounce_stems` now
+  computes the real extent of the source tracks' own items and sets that
+  as the time selection before invoking the render, so it always covers
+  the actual content regardless of whatever time selection happened to be
+  active beforehand. The extent computation is a small, directly-tested
+  pure function (`compute_items_extent`) rather than inline logic, so this
+  doesn't need REAPER/IPC mocking to verify.
+- **Installers now guard against a real package-rename collision.** This
+  project's PyPI distribution name changed twice (`reaper-mcp` →
+  `reapermcp` → `xdarkzx-reaper-mcp`) while the console command stayed
+  `reaper-mcp` throughout. A machine that already had an old-named install
+  present could end up with a broken, half-replaced `reaper-mcp` launcher
+  that invoked the wrong code entirely after updating — a real, confirmed
+  incident. `install.bat`/`install.sh` now uninstall any old-named package
+  first, so existing users updating can't hit this on a future pull.
+
+### Added
+
+- **`fx_scan_params`**: an on-demand fallback tool that sweeps a plugin's
+  parameters to learn their real range/units/curve shape, for the cases
+  where reasoning from general knowledge genuinely isn't enough (obscure/
+  freeware plugins, surprising parameter behavior) — not a routine
+  "understand this plugin" tool. Backed by an on-disk plugin param cache
+  with curve inference, so a scanned plugin doesn't need re-scanning.
+
 ### CI and Repository Updates
 
 None of this changes the package itself.

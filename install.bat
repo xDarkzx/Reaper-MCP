@@ -98,7 +98,20 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: Install from local directory (not on PyPI yet)
+:: This project's PyPI package name changed twice (reaper-mcp ->
+:: reapermcp -> xdarkzx-reaper-mcp) while the console command stayed
+:: "reaper-mcp" throughout - pip does not treat a package-name change
+:: as an upgrade of the same project, so a machine that already had an
+:: old-named install present can end up with a broken, half-replaced
+:: "reaper-mcp" launcher script that invokes the wrong code entirely
+:: (a real, confirmed incident, not a hypothetical). Uninstalling any
+:: old name first guarantees this install starts from a clean slate
+:: regardless of what was here before.
+python -m pip uninstall -y reaper-mcp reapermcp >nul 2>&1
+
+:: Install from local directory in editable mode, so tool changes in
+:: this checkout take effect without reinstalling - not because the
+:: package isn't on PyPI (it is, as xdarkzx-reaper-mcp).
 pushd "%~dp0"
 python -m pip install -e .
 if %errorlevel% neq 0 (
