@@ -4,6 +4,8 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-22
+
 ### Fixed
 
 - **The `mixing` tool profile excluded `setup_fx_chain`/`setup_effect_bus`**
@@ -16,7 +18,6 @@ All notable changes to ReaperMCP will be documented in this file.
   still a 55%+ cut from `full`'s 181. Corrected the profile table's
   tool counts in `docs/TOOLS.md` too (were stale approximations).
 
-### Fixed
 
 - **`setup_fx_chain` (batch add/configure FX across tracks — has existed
   since 2026-07-17) had two real robustness gaps that plausibly explain
@@ -33,7 +34,6 @@ All notable changes to ReaperMCP will be documented in this file.
   editing an already-existing FX's params by index) — the underlying
   capability wasn't new, just not discoverable enough.
 
-### Fixed
 
 - **`fx_scan_params` only sampled 3 fixed points (0.0/0.5/1.0), which is
   useless for stepped/categorical parameters** like Pro-Q 3's "Shape"
@@ -305,7 +305,6 @@ None of this changes the package itself.
   "clear" automation, a worked dB→linear-gain conversion table, and a
   reminder to verify writes with `envelope_get_points` rather than assume.
 
-### Fixed
 
 - **`create_drum_pattern`/`create_chord_progression`/`load_loops` read the
   auto-created item/track index from the wrong place in the bridge
@@ -572,7 +571,6 @@ None of this changes the package itself.
   - `analyze_stereo_field(wav_path)` — phase correlation, mid / side RMS, side-to-mid ratio, mono-compatibility hint.
 - **Optional `[analysis]` extras** — `numpy`, `soundfile`, `pyloudnorm`. Install with `pip install -e ".[analysis]"`. Tools degrade silently and log a one-line hint to stderr if deps are missing, so the server stays up.
 
-### Fixed
 
 - **`install.sh` used the wrong Python on Macs with both Intel and Apple
   Silicon Homebrew installed.** The PATH setup always let `/usr/local/bin`
