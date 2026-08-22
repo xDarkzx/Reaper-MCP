@@ -329,12 +329,79 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def setup_fx_chain(tracks: str) -> dict:
-        """Batch add/configure FX across tracks. Replaces many fx_add + fx_set_param calls.
+        """Batch add and/or configure FX across any number of tracks in one
+        call — this is the tool for both "add several plugins and set their
+        params" AND "set many params on FX I already added," across
+        multiple tracks/bands at once. Reach for this instead of chaining
+        individual fx_add/fx_set_param/fx_set_param_by_name calls — setting
+        up one FabFilter Pro-Q 3 EQ band properly (Used, Enabled, Frequency,
+        Gain, Shape) is 4-5 separate single-param calls done that way; here
+        it's one `fx_chain` entry.
+
+        Params are applied in a fixed, deterministic order (not raw dict
+        iteration order) specifically because some plugins (confirmed:
+        FabFilter Pro-Q 3/Pro-C 2) crash if a band's Used/Enabled flag isn't
+        written before its other params — this already handles that, no
+        need to sequence params yourself.
+
+        Example — add the same plugin (e.g. an EQ) to 5 different tracks in
+        one call, instead of 5 separate fx_add calls:
+        ```json
+        [
+            {"track_index": 0, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]},
+            {"track_index": 1, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]},
+            {"track_index": 2, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]},
+            {"track_index": 3, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]},
+            {"track_index": 4, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]}
+        ]
+        ```
+        `fx_chain` can hold more than one plugin per track too — a whole
+        Saturn + Pro-Q 3 + Pro-C 2 chain, with params, added to several
+        tracks, is still one call.
+
+        Example — set up Band 1 (Low Cut) and Band 2 (High Shelf, +2dB) on
+        an EQ that's already track 0's fx_index 1, by index (skips the
+        fuzzy name-matching lookup, marginally faster for a big batch):
+        ```json
+        [{"track_index": 0, "fx_chain": [
+            {"fx_index": 1, "params_by_index": {
+                "0": 1.0, "1": 1.0, "2": 0.218, "8": 0.25
+            }},
+            {"fx_index": 1, "params_by_index": {
+                "13": 1.0, "14": 1.0, "15": 0.845, "16": 0.533, "21": 0.375
+            }}
+        ]}]
+        ```
+        (Same `fx_index` reused across entries is fine — each entry is an
+        independent set of param writes, not a new FX add.)
 
         Args:
-            tracks: JSON array. Each: {"track_index":0, "fx_chain":[{"name":"ReaEQ", "params":{"Gain":0.5}, "preset":"..."}]}.
-                    fx_chain modes: "name" adds new, "fx_index" targets existing, "add_mode":"find_or_add" reuses.
-                    Params by name (fuzzy) or params_by_index. Values 0.0-1.0.
+            tracks: JSON array, one object per track:
+                `{"track_index": int, "fx_chain": [...]}`. Each `fx_chain`
+                entry is one FX to add-and/or-configure:
+                - `"name": str` — add new via fuzzy match (default mode).
+                  `"add_mode": "find_or_add"` reuses an existing instance of
+                  that plugin instead of adding a duplicate;
+                  `"add_mode": "find_only"` fails if it's not already there.
+                - `"fx_index": int` — target an FX that's already in the
+                  chain (from an earlier fx_add/setup_fx_chain call, or
+                  already present in the project) instead of adding one.
+                - `"params": {name: value}` — set params by fuzzy name
+                  match (e.g. `"Band 1 Frequency"`). Values 0.0-1.0
+                  normalized, same as fx_set_param.
+                - `"params_by_index": {"<index>": value}` — same, by exact
+                  0-based param index (keys are strings — JSON object keys
+                  always are). Skips the per-param name lookup.
+                - `"preset": str` — load a preset by name after params are
+                  applied.
+
+        Every failure is reported per-item in the response's `summary`
+        (`{"error": "..."}` on that track or that one param), never a hard
+        abort of the whole batch — a bad track_index, an FX name that
+        doesn't resolve, or a param name/index that doesn't match anything
+        each fail on their own without losing whatever else in the same
+        call succeeded. Check `summary` rather than assuming a
+        non-throwing call means every item landed.
         """
         try:
             data = json.loads(tracks)

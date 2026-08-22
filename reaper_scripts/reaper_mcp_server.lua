@@ -3714,9 +3714,18 @@ function compose.setup_fx_chain(p)
     local ti = math.floor(entry.track_index)
     local tr = reaper.GetTrack(0, ti)
     if not tr then
-      reaper.PreventUIRefresh(-1)
-      reaper.Undo_EndBlock("setup_fx_chain", -1)
-      return nil, "Track not found: " .. ti
+      -- Real, confirmed robustness gap this closes: a single bad
+      -- track_index used to abort the ENTIRE batch (hard return, no
+      -- partial results, every other track's work discarded from the
+      -- response even if REAPER itself already applied it) - a bad FX
+      -- name/index within a track was already handled gracefully as a
+      -- per-entry error, so this inconsistency is exactly the kind of
+      -- thing that erodes trust in a batch tool and pushes a caller
+      -- back toward one-at-a-time calls it can verify individually.
+      -- Now consistent: report the error for this track and continue
+      -- processing the rest of the batch.
+      summary[#summary+1] = {track_index = ti, error = "Track not found: " .. ti}
+      goto next_track
     end
     local _, track_name = reaper.GetTrackName(tr)
     local track_result = {track_index = ti, track_name = track_name, fx_added = {}}
@@ -3779,20 +3788,34 @@ function compose.setup_fx_chain(p)
               local val = reaper.TrackFX_GetParam(tr, fx_idx, found)
               local _, fmt = reaper.TrackFX_FormatParamValue(tr, fx_idx, found, val, "")
               params_set[#params_set+1] = {name = param_name, index = found, value = val, display = fmt}
+            else
+              -- Real, confirmed robustness gap this closes: a param
+              -- name that didn't fuzzy-match anything used to be
+              -- silently dropped, with no error and no trace in the
+              -- response - unlike every other failure mode in this
+              -- function, which are all reported. A caller discovering
+              -- this only by separately checking fx_get_params
+              -- afterward (and finding a param it asked for was never
+              -- actually set) is exactly the kind of surprise that
+              -- erodes trust in a batch tool.
+              params_set[#params_set+1] = {name = param_name, error = "Parameter not found"}
             end
           end
         end
 
         -- Set params by index
         if fx_entry.params_by_index then
+          local num_params = reaper.TrackFX_GetNumParams(tr, fx_idx)
           for pi_str, param_val in sorted_index_pairs(fx_entry.params_by_index) do
             local pi = math.floor(tonumber(pi_str) or -1)
-            if pi >= 0 then
+            if pi >= 0 and pi < num_params then
               reaper.TrackFX_SetParam(tr, fx_idx, pi, param_val)
               local val = reaper.TrackFX_GetParam(tr, fx_idx, pi)
               local _, pn = reaper.TrackFX_GetParamName(tr, fx_idx, pi, "")
               local _, fmt = reaper.TrackFX_FormatParamValue(tr, fx_idx, pi, val, "")
               params_set[#params_set+1] = {name = pn, index = pi, value = val, display = fmt}
+            else
+              params_set[#params_set+1] = {index = pi, error = "Invalid parameter index"}
             end
           end
         end
@@ -3830,6 +3853,7 @@ function compose.setup_fx_chain(p)
     end
 
     summary[#summary+1] = track_result
+    ::next_track::
   end
 
   reaper.PreventUIRefresh(-1)

@@ -6,6 +6,23 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Fixed
 
+- **`setup_fx_chain` (batch add/configure FX across tracks — has existed
+  since 2026-07-17) had two real robustness gaps that plausibly explain
+  why callers avoided it in favor of many individual fx_add/fx_set_param
+  calls despite it already covering that case:** a single bad
+  `track_index` aborted the *entire* batch with a hard error and no
+  partial results, inconsistent with a bad FX name/index within a track
+  (already handled gracefully, per-entry); and a `params`/
+  `params_by_index` entry that didn't match any real parameter was
+  silently dropped with no error at all. Both now report per-item in the
+  response's `summary` instead — a bad item fails on its own, the rest of
+  the batch still completes. Also rewrote the tool's docstring with
+  concrete examples (same plugin to several tracks in one call; batch-
+  editing an already-existing FX's params by index) — the underlying
+  capability wasn't new, just not discoverable enough.
+
+### Fixed
+
 - **`fx_scan_params` only sampled 3 fixed points (0.0/0.5/1.0), which is
   useless for stepped/categorical parameters** like Pro-Q 3's "Shape"
   dropdown (~8 real values: Bell, Low Shelf, Low Cut, High Shelf, High
