@@ -1,56 +1,7 @@
-import json
-
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
-from reaper_mcp_shared.constants import MAX_PARAMS_PER_BATCH, MAX_SCAN_PARAMS
+from reaper_mcp_shared.constants import MAX_SCAN_PARAMS
 from reaper_mcp_shared.plugin_cache import infer_curve, load_cached_map, save_cached_map
-
-
-def validate_batch_params(parsed) -> None:
-    """Validates the parsed JSON body of fx_set_params_batch's `params`
-    argument, raising ReaperMCPError on the first problem found. Extracted
-    as a plain function (not inlined in the tool) so it's directly
-    unit-testable without needing to mock the REAPER IPC client at all."""
-    if not isinstance(parsed, list) or not parsed:
-        raise ReaperMCPError(
-            ErrorCode.INVALID_PARAMETER,
-            f"`params` must be a non-empty JSON array, got {type(parsed).__name__}",
-        )
-    if len(parsed) > MAX_PARAMS_PER_BATCH:
-        raise ReaperMCPError(
-            ErrorCode.VALUE_OUT_OF_RANGE,
-            f"Too many items ({len(parsed)}) — split into batches <= {MAX_PARAMS_PER_BATCH}.",
-        )
-    for i, item in enumerate(parsed):
-        if not isinstance(item, dict):
-            raise ReaperMCPError(
-                ErrorCode.INVALID_PARAMETER,
-                f"params[{i}] must be an object, got {type(item).__name__}",
-            )
-        for k in ("track_index", "fx_index", "value"):
-            if k not in item:
-                raise ReaperMCPError(
-                    ErrorCode.INVALID_PARAMETER, f"params[{i}] is missing required key '{k}'"
-                )
-        has_index = "param_index" in item
-        # bool(...) matters here, not just truthiness: `and` returns the
-        # operand itself (e.g. a non-empty string), and `has_index ==
-        # has_name` below needs a real bool on both sides to correctly
-        # detect "both given" or "neither given" - confirmed by a real
-        # failing test: `True == "Band 1 Shape"` and `False == ""` are
-        # both False in Python, silently letting invalid combinations
-        # through the check that was meant to catch them.
-        has_name = bool(item.get("param_name"))
-        if has_index == has_name:
-            raise ReaperMCPError(
-                ErrorCode.INVALID_PARAMETER,
-                f"params[{i}] must have exactly one of param_index or param_name",
-            )
-        value = item["value"]
-        if not (isinstance(value, (int, float)) and 0.0 <= value <= 1.0):
-            raise ReaperMCPError(
-                ErrorCode.VALUE_OUT_OF_RANGE, f"params[{i}].value must be 0.0-1.0, got {value!r}"
-            )
 
 
 def register(mcp: FastMCP):
@@ -169,47 +120,6 @@ def register(mcp: FastMCP):
             track_index=track_index, fx_index=fx_index,
             param_name=param_name, value=value,
         )
-
-    @mcp.tool()
-    async def fx_set_params_batch(params: str) -> dict:
-        """Set many FX parameters in one round-trip instead of one call per
-        parameter. Setting up a single EQ band properly (Used, Enabled,
-        Frequency, Gain, Shape) is 4-5 separate fx_set_param/
-        fx_set_param_by_name calls today — a real, reported cost at scale
-        (a handful of bands across a few tracks adds up to 40-60 calls).
-        This is that same operation, batched: any mix of tracks and FX in
-        one call.
-
-        Each item is independent (its own track_index/fx_index/value, plus
-        either param_index or param_name) and fails on its own — one bad
-        item (typo'd name, wrong track) does not abort the rest of the
-        batch, unlike a single JSON-parse failure for the whole `params`
-        argument, which does fail everything (nothing could be attempted
-        at all in that case).
-
-        Args:
-            params: JSON array of objects, each:
-                `{"track_index": int, "fx_index": int, "value": float 0.0-1.0,
-                "param_index": int}` OR the same with `"param_name": str`
-                instead of `param_index` (fuzzy match, same as
-                fx_set_param_by_name). Exactly one of param_index/param_name
-                per item.
-
-        Returns `{"results": [...], "count": int, "fail_count": int}` — each
-        result is `{"success": bool, "item_index": int, ...}`: on success,
-        `param_index`, `name`, `value`, `display`; on failure, `error`.
-        Check `fail_count` rather than assuming a 200-shaped response means
-        every item landed.
-        """
-        try:
-            parsed = json.loads(params)
-        except json.JSONDecodeError as e:
-            raise ReaperMCPError(
-                ErrorCode.INVALID_PARAMETER,
-                f"`params` is not valid JSON: {e.msg} (line {e.lineno}, col {e.colno})",
-            )
-        validate_batch_params(parsed)
-        return await client.execute("fx_set_params_batch", params=params)
 
     @mcp.tool()
     async def fx_scan_params(track_index: int, fx_index: int) -> dict:

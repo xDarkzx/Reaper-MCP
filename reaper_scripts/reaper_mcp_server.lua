@@ -1362,68 +1362,6 @@ function fx.fx_set_param_by_name(p)
   return {param_index = found, name = pname, value = val, display = fmt, fx_name = fx_name}
 end
 
-function fx.fx_set_params_batch(p)
-  -- One round-trip for many param sets, across any mix of tracks/FX -
-  -- setting up a single Pro-Q 3 band was 4-5 separate calls (Used,
-  -- Enabled, Frequency, Gain, Shape) before this; a real, reported pain
-  -- point at 40-60 calls for a handful of EQ chains. Each item is
-  -- independent (its own track_index/fx_index/param/value) and one bad
-  -- item (missing param, wrong track) fails only that item - pcall per
-  -- item, not the whole batch, since aborting everything because item
-  -- 37 of 60 had a typo would defeat the entire point of batching.
-  if not p.params then return nil, "Missing parameter: params" end
-  local items = json_decode(p.params)
-  if not items then return nil, "Invalid params JSON" end
-
-  local results = {}
-  for i, item in ipairs(items) do
-    local ok, result_or_err = pcall(function()
-      local tr, _, terr = get_track(item)
-      if not tr then error(terr, 0) end
-      local fi = require_int(item, "fx_index")
-      local val_in = require_num(item, "value")
-
-      local pi
-      if item.param_index ~= nil then
-        pi = math.floor(tonumber(item.param_index))
-      elseif item.param_name ~= nil and item.param_name ~= "" then
-        local num = reaper.TrackFX_GetNumParams(tr, fi)
-        pi = -1
-        for j = 0, num - 1 do
-          local _, pname = reaper.TrackFX_GetParamName(tr, fi, j, "")
-          if pname:lower():find(tostring(item.param_name):lower(), 1, true) then
-            pi = j; break
-          end
-        end
-        if pi < 0 then error("Parameter not found: " .. tostring(item.param_name), 0) end
-      else
-        error("Item needs param_index or param_name", 0)
-      end
-
-      reaper.TrackFX_SetParam(tr, fi, pi, val_in)
-      local val = reaper.TrackFX_GetParam(tr, fi, pi)
-      local _, pname = reaper.TrackFX_GetParamName(tr, fi, pi, "")
-      local _, fmt = reaper.TrackFX_FormatParamValue(tr, fi, pi, val, "")
-      return {param_index = pi, name = pname, value = val, display = fmt}
-    end)
-    if ok then
-      results[i] = {
-        success = true, item_index = i - 1,
-        param_index = result_or_err.param_index, name = result_or_err.name,
-        value = result_or_err.value, display = result_or_err.display,
-      }
-    else
-      results[i] = {success = false, item_index = i - 1, error = tostring(result_or_err)}
-    end
-  end
-
-  local fail_count = 0
-  for _, r in ipairs(results) do
-    if not r.success then fail_count = fail_count + 1 end
-  end
-  return {results = results, count = #results, fail_count = fail_count}
-end
-
 function fx.fx_scan_params(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
