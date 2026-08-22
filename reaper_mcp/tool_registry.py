@@ -25,10 +25,23 @@ PROFILES: dict[str, set[str] | None] = {
         "loops_tools", "chops_tools", "script_tools",
     },
     # `mixing` — mix + master + bus pipelines + analysis. Drops MIDI/composition.
+    # Includes compose_edit_tools despite the name - it's where setup_fx_chain/
+    # setup_effect_bus actually live (a module-naming/boundary mismatch, not a
+    # deliberate exclusion), and those two are core mixing tools: batch add/
+    # configure FX across tracks, and one-call effect-bus setup. A real,
+    # confirmed incident: this profile excluding them pushed a caller back to
+    # many individual fx_add/fx_set_param calls instead, exactly the
+    # per-call overhead problem the mixing profile itself exists to avoid.
+    # The other 7 tools compose_edit_tools also carries (wipe_all_midi,
+    # reset_composition, configure_tracks, setup_routing, add_markers_batch,
+    # rewrite_cc, edit_section) are genuinely composition-side and technically
+    # off-topic for "mixing" - accepted as the pragmatic tradeoff over leaving
+    # setup_fx_chain/setup_effect_bus unreachable, rather than splitting the
+    # module.
     "mixing": {
         "transport_tools", "track_tools", "fx_tools", "inventory_tools",
         "mix_tools", "sidechain_tools", "pipeline_tools", "send_tools",
-        "envelope_tools", "analysis_tools",
+        "envelope_tools", "analysis_tools", "compose_edit_tools",
     },
     # `analysis` — inspect + measure. Minimal edit surface.
     "analysis": {

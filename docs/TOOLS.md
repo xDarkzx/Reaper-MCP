@@ -12,9 +12,9 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Approx. tools | Use when |
 |---------|--------:|--------------:|----------|
-| `full` | 26 | 180 | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `full` | 26 | 181 | Default. You're on Claude / GPT-4 / Gemini-class models. |
 | `composition` | 17 | ~130 | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
-| `mixing` | 10 | ~71 | Mixing / mastering / bus pipelines. Drops MIDI / composition. |
+| `mixing` | 11 | 82 | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. Cuts the tool surface by more than half vs. `full` — worth setting explicitly (`REAPER_MCP_PROFILE=mixing`) for FX/mix-focused sessions, since every configured MCP tool's schema costs context on every turn regardless of whether it's used. |
 | `analysis` | 5 | ~53 | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | ~43 | Smoke test / basic control surface. |
 

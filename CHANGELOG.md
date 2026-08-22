@@ -6,6 +6,18 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ### Fixed
 
+- **The `mixing` tool profile excluded `setup_fx_chain`/`setup_effect_bus`**
+  (they live in `compose_edit_tools.py`, a module-naming/boundary mismatch,
+  not deliberate) — real, confirmed impact: an MCP client scoped to
+  `mixing` for FX/mix work couldn't reach the batch FX-setup tools at all,
+  silently pushed back toward many individual fx_add/fx_set_param calls
+  instead, exactly the per-call overhead the profile system exists to
+  avoid. `mixing` now includes `compose_edit_tools`: 82 tools (was ~71),
+  still a 55%+ cut from `full`'s 181. Corrected the profile table's
+  tool counts in `docs/TOOLS.md` too (were stale approximations).
+
+### Fixed
+
 - **`setup_fx_chain` (batch add/configure FX across tracks — has existed
   since 2026-07-17) had two real robustness gaps that plausibly explain
   why callers avoided it in favor of many individual fx_add/fx_set_param
