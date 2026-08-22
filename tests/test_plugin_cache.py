@@ -62,6 +62,22 @@ class TestInferCurve:
         curve, unit = infer_curve(["0 dB", "0 dB", "0 dB"])
         assert curve == "unknown"
 
+    def test_bipolar_db_with_leading_plus_is_linear(self):
+        # Regression test for a real, reported bug (GitHub issue #22):
+        # _NUMBER_RE only accepted a leading "-", not "+". Plugins format
+        # bipolar controls (EQ band gain, compressor makeup, pan, trim)
+        # with an explicit "+" above zero, so the sample above zero failed
+        # to parse, numeric_count dropped below len(samples), and this
+        # returned ("unknown", None) for what is usually a plain linear
+        # dB control - confirmed against a real FabFilter Pro-Q 4 band
+        # gain sweep, not hypothetical. The existing
+        # test_linear_decibels_with_negative_values case is unipolar
+        # (approaches zero from below, never crosses it) and can't
+        # exercise this path - kept as its own case, not replaced.
+        curve, unit = infer_curve(["-30.00 dB", "0.00 dB", "+30.00 dB"])
+        assert curve == "linear"
+        assert unit == "dB"
+
     def test_positive_step_count_is_stepped_regardless_of_samples(self):
         # Regression test: REAPER's own TrackFX_GetParameterStepCount is a
         # ground-truth signal, not a guess - it must win even if the

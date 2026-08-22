@@ -4,6 +4,21 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-22
+
+### Fixed
+
+- **`infer_curve` returned `"unknown"` for every bipolar parameter** (EQ
+  band gain, compressor makeup, pan, trim) instead of `"linear"`, because
+  `_NUMBER_RE` only accepted a leading `-`, not `+` — plugins format
+  bipolar controls with an explicit `+` above zero, so the sample above
+  zero failed to parse and `numeric_count` dropped below `len(samples)`.
+  Reported with an exact repro against a real FabFilter Pro-Q 4 band-gain
+  sweep by **[@SNChicago](https://github.com/SNChicago)** in
+  [#22](https://github.com/xDarkzx/Reaper-MCP/issues/22), including the
+  root cause, the one-character fix, and why the existing test suite
+  (unipolar only) couldn't catch it. Thank you!
+
 ## [0.6.5] - 2026-08-22
 
 ### Fixed

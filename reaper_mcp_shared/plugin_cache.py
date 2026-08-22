@@ -19,7 +19,7 @@ def sanitize_plugin_name(name: str) -> str:
     return safe.strip("_").lower()
 
 
-_NUMBER_RE = re.compile(r"\s*(-?\d+\.?\d*)\s*([a-zA-Z%]*)")
+_NUMBER_RE = re.compile(r"\s*([-+]?\d+\.?\d*)\s*([a-zA-Z%]*)")
 _UNIT_MULTIPLIERS = {"k": 1000.0, "m": 0.001}
 
 
