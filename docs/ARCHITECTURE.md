@@ -100,6 +100,14 @@ def register(mcp):
 
 That's it — the file is auto-discovered on the next server start.
 
+### Filtering, Allowlists, and Instructions
+
+When tools are registered, `register_all_tools(mcp, profile)` passes a `ToolFilterProxy` wrapping FastMCP. This proxy dynamically filters tool registrations against the active `ToolProfile`:
+- **Module-level filtering:** Skips excluded or non-included modules before importing or registering.
+- **Exact tool-level filtering:** Intercepts `@mcp.tool()` to filter by tool name (`include_tools`, `exclude_tools`).
+- **Profile-scoped instructions:** `load_instructions(profile.instruction_packs)` composes only the relevant markdown packs from `reaper_mcp/instructions/` (cutting context size by up to ~85% for narrow profiles while keeping safety rules intact).
+- **Introspection:** `describe_profile(...)` provides exact measurements of tool counts, schema sizes, and instruction sizes.
+
 If a module raises during import or registration, the registry logs the failure, writes a visible banner to stderr, and continues loading the rest. One broken file can't take the server down.
 
 Modules without a `register(...)` function (e.g., `compose_helpers.py`) are silently skipped, so helper modules can live in the same folder without being mistaken for tool providers.

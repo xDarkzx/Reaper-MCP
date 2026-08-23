@@ -2,7 +2,41 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
-## [Unreleased]
+## [0.6.7] - 2026-08-24
+
+### Added
+
+- **Exact Tool Allowlists & Custom Profiles (Issue #24)**: Extended the profile
+  system from module-level filtering to exact tool-level allowlists/blocklists
+  via `ToolProfile` (`include_tools`, `exclude_tools`, `include_modules`,
+  `exclude_modules`). Introduced `ToolFilterProxy` to dynamically intercept
+  and filter `@mcp.tool()` registrations during module loading.
+- **Profile Configuration Files & Overrides (Issue #24)**: Added support for
+  loading custom profiles from local `.toml` or `.json` files via
+  `REAPER_MCP_PROFILE_FILE`, plus fine-grained environment variable overrides:
+  `REAPER_MCP_INCLUDE_TOOLS`, `REAPER_MCP_EXCLUDE_TOOLS`,
+  `REAPER_MCP_INCLUDE_MODULES`, and `REAPER_MCP_EXCLUDE_MODULES`.
+- **Profile-Scoped Instruction Packs (Issue #24)**: Split the monolithic
+  instruction file into 8 composable markdown packs (`00_critical_rules.md`,
+  `10_composition.md`, `20_automation.md`, `30_mixing.md`, `40_editing.md`,
+  `50_postproduction.md`, `60_bbc_spitfire.md`, `70_style_cheat_sheet.md`).
+  Profiles now only load the instructions relevant to their active tools,
+  cutting instruction context by up to ~85% for narrow profiles while keeping
+  safety rules intact.
+- **Profile Introspection CLI (Issue #24)**: Added `reaper-mcp --profile-info
+  <profile> [--json]` and `describe_profile(...)` to measure registered tool
+  counts, tool schema size, and instruction token footprints.
+- **Read-Only FX Pin Mappings Inspection (Issue #23)**: Added `fx_get_pin_mappings`
+  tool wrapping REAPER's `TrackFX_GetPinMappings` to inspect input and output
+  pin configurations (channel lists and raw 32-bit bitmasks) non-destructively
+  before automating sidechain or multi-channel parameters.
+- **Extended Send Inspection & Channel Mapping (Issue #23)**: `send_get_all` now
+  reports `send_mode` (`raw` integer and human-readable `name` such as
+  `post_fader`, `pre_fader_post_fx`) and `audio` routing (`source_channel_raw`,
+  `destination_channel_raw`, and human-readable `interpreted` string e.g. `1/2 -> 3/4`).
+- **Track Channel Count (Issue #23)**: `track_get_all` and `track_get_info` now
+  include `channel_count` (`I_NCHAN`), normalizing REAPER's `0` default sentinel
+  to `2` so callers always receive a concrete channel count.
 
 ## [0.6.6] - 2026-08-22
 

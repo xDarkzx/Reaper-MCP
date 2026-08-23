@@ -521,6 +521,16 @@ local function track_sample_filenames(tr)
   return names
 end
 
+-- REAPER I_NCHAN stores the number of track channels (2, 4, 6, … 64).
+-- A value of 0 means the track uses the project default (usually 2).
+local function track_channel_count(tr)
+  local nchan = reaper.GetMediaTrackInfo_Value(tr, "I_NCHAN")
+  -- 0 is REAPER's sentinel for "use project default"; report it as 2 so
+  -- callers always receive a concrete, usable number.
+  if nchan == nil or nchan <= 0 then return 2 end
+  return math.floor(nchan)
+end
+
 local function build_track_info(tr, idx)
   local _, name = reaper.GetTrackName(tr)
   local vol = reaper.GetMediaTrackInfo_Value(tr, "D_VOL")
@@ -546,6 +556,10 @@ local function build_track_info(tr, idx)
     sample_filenames = track_sample_filenames(tr),
     send_count = reaper.GetTrackNumSends(tr, 0),
     receive_count = reaper.GetTrackNumSends(tr, -1),
+    -- Number of audio channels active on this track (I_NCHAN). Relevant
+    -- for multi-channel / sidechain routing; 0 from REAPER is normalised
+    -- to 2 (project default) so callers always get a concrete value.
+    channel_count = track_channel_count(tr),
     folder_depth = reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH"),
     color_r = r, color_g = g, color_b = b,
     input_index = reaper.GetMediaTrackInfo_Value(tr, "I_RECINPUT"),
@@ -725,6 +739,27 @@ local function build_fx_params(tr, fx_idx)
   }
 end
 
+-- Human-readable names for REAPER's I_SENDMODE integer values.
+-- 0=post-fader (default), 1=pre-fader post-FX, 2=pre-fader pre-FX, 3=post-FX only.
+local SEND_MODE_NAMES = {
+  [0] = "post_fader",
+  [1] = "pre_fader_post_fx",
+  [2] = "pre_fader_pre_fx",
+  [3] = "post_fx_only",
+}
+
+-- Decode a raw REAPER channel integer (I_SRCCHAN / I_DSTCHAN) into the
+-- 1-based stereo pair it represents.  REAPER stores the *zero-based* index
+-- of the first channel in the pair: 0 = ch1/2, 2 = ch3/4, 4 = ch5/6, …
+-- Returns the human-readable pair string e.g. "1/2", "3/4" and the
+-- raw zero-based start index for lossless round-trips.
+local function decode_channel_pair(raw)
+  local start0 = math.floor(raw or 0)  -- zero-based first channel
+  local ch1 = start0 + 1               -- 1-based first channel
+  local ch2 = start0 + 2               -- 1-based second channel (stereo pair)
+  return ch1 .. "/" .. ch2, start0
+end
+
 local function build_send_info(tr, send_idx)
   local vol = reaper.GetTrackSendInfo_Value(tr, 0, send_idx, "D_VOL")
   local pan = reaper.GetTrackSendInfo_Value(tr, 0, send_idx, "D_PAN")
@@ -743,6 +778,12 @@ local function build_send_info(tr, send_idx)
     midi_src_chan = midi_flags & 31
     midi_dst_chan = (midi_flags >> 5) & 31
   end
+  -- Routing channel fields (Issue #23)
+  local raw_sendmode = math.floor(reaper.GetTrackSendInfo_Value(tr, 0, send_idx, "I_SENDMODE") or 0)
+  local raw_srcchan  = math.floor(reaper.GetTrackSendInfo_Value(tr, 0, send_idx, "I_SRCCHAN")  or 0)
+  local raw_dstchan  = math.floor(reaper.GetTrackSendInfo_Value(tr, 0, send_idx, "I_DSTCHAN")  or 0)
+  local src_pair, src_raw = decode_channel_pair(raw_srcchan)
+  local dst_pair, dst_raw = decode_channel_pair(raw_dstchan)
   return {
     index = send_idx,
     volume = vol,
@@ -754,6 +795,16 @@ local function build_send_info(tr, send_idx)
     midi_enabled = midi_src_chan ~= 31,
     dest_track_index = dest_index,
     dest_track_name = dest_name,
+    -- Routing inspection fields (Issue #23)
+    send_mode = {
+      raw = raw_sendmode,
+      name = SEND_MODE_NAMES[raw_sendmode] or "unknown",
+    },
+    audio = {
+      source_channel_raw = src_raw,
+      destination_channel_raw = dst_raw,
+      interpreted = src_pair .. " -> " .. dst_pair,
+    },
   }
 end
 
@@ -1600,6 +1651,79 @@ function fx.fx_list_installed(p)
     end
   end
   return {count = #plugins, plugins = plugins}
+end
+
+function fx.fx_get_pin_mappings(p)
+  -- Read-only inspection of an FX plugin's input and output pin mappings
+  -- via TrackFX_GetPinMappings (Issue #23).  Each pin entry includes:
+  --   pin              — 0-based pin index
+  --   track_channels   — list of 1-based track channel numbers connected to this pin
+  --   low32_raw        — raw low-32-bit bitmask from REAPER (lossless)
+  --   high32_raw       — raw high-32-bit bitmask (channels 33-64)
+  local tr, idx, err = get_track(p)
+  if not tr then return nil, err end
+  if p.fx_index == nil then return nil, "Missing parameter: fx_index" end
+  local fi = math.floor(p.fx_index)
+  if fi < 0 then return nil, "fx_index must be >= 0" end
+  local fx_count = reaper.TrackFX_GetCount(tr)
+  if fi >= fx_count then
+    return nil, "fx_index " .. fi .. " out of range (track has " .. fx_count .. " FX)"
+  end
+  if not reaper.TrackFX_GetPinMappings then
+    return nil, "REAPER version too old: TrackFX_GetPinMappings unavailable. Update REAPER to >= 6.0."
+  end
+
+  -- REAPER reports a fixed set of pins per FX; we iterate until the bitmask
+  -- is zero for both in and out to find the real boundary, capping at 64 pins
+  -- as a safety limit (no known plugin has more than ~32 usable pins).
+  local MAX_PINS = 64
+
+  local function read_pins(is_output)
+    -- is_output: 1 = output pins, 0 = input pins
+    local pins = {}
+    for pin = 0, MAX_PINS - 1 do
+      local low, high = reaper.TrackFX_GetPinMappings(tr, fi, is_output, pin)
+      if low == nil then break end  -- API not available or pin out of range
+      -- Both zero means no channels are wired to this pin; stop scanning
+      -- only after we've checked pin 0 (a plugin may have nothing on pin 0
+      -- but something on pin 2, though that's unusual).
+      if (low == 0 and high == 0) and pin > 0 then
+        -- Peek one more: if that's also empty, we're past the real pins.
+        local nlow, nhigh = reaper.TrackFX_GetPinMappings(tr, fi, is_output, pin + 1)
+        if nlow == nil or (nlow == 0 and nhigh == 0) then break end
+      end
+      -- Decode bitmask → list of 1-based track channel numbers.
+      -- low covers channels 1-32 (bit 0 = ch1 … bit 31 = ch32).
+      -- high covers channels 33-64.
+      local channels = {}
+      for bit = 0, 31 do
+        if low & (1 << bit) ~= 0 then
+          channels[#channels+1] = bit + 1
+        end
+      end
+      for bit = 0, 31 do
+        if high & (1 << bit) ~= 0 then
+          channels[#channels+1] = bit + 33
+        end
+      end
+      pins[#pins+1] = {
+        pin         = pin,
+        track_channels = channels,
+        low32_raw   = math.floor(low),
+        high32_raw  = math.floor(high),
+      }
+    end
+    return pins
+  end
+
+  local _, fx_name = reaper.TrackFX_GetFXName(tr, fi, "")
+  return {
+    track_index = idx,
+    fx_index    = fi,
+    fx_name     = fx_name or "",
+    inputs      = read_pins(0),
+    outputs     = read_pins(1),
+  }
 end
 
 -- ============================================================

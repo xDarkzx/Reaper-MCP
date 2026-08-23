@@ -1,22 +1,50 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **180 tools across 26 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **182 tools across 26 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
-> **Too many tools for your model?** Some LLMs cap the tool surface (Groq Llama 3 = 128, Claude Haiku + some local models have lower ceilings). Set the `REAPER_MCP_PROFILE` environment variable to trim the surface to a workflow-specific subset. See [Tool profiles](#tool-profiles) below.
+> **Too many tools for your model?** Some LLMs cap the tool surface (Groq Llama 3 = 128, Claude Haiku + some local models have lower ceilings). Set the `REAPER_MCP_PROFILE` environment variable to trim the surface to a workflow-specific subset, or use exact tool allowlists. See [Tool profiles](#tool-profiles) below.
 
 ## Tool profiles
 
-Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register only a subset of modules. Default is `full` (everything).
+Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register only a subset of modules and instructions. Default is `full` (everything).
 
-| Profile | Modules | Approx. tools | Use when |
-|---------|--------:|--------------:|----------|
-| `full` | 26 | 181 | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 17 | ~130 | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
-| `mixing` | 11 | 82 | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. Cuts the tool surface by more than half vs. `full` — worth setting explicitly (`REAPER_MCP_PROFILE=mixing`) for FX/mix-focused sessions, since every configured MCP tool's schema costs context on every turn regardless of whether it's used. |
-| `analysis` | 5 | ~53 | Inspect and measure only. Read-mostly workflow. |
-| `minimal` | 3 | ~43 | Smoke test / basic control surface. |
+| Profile | Modules | Exact Tools | Instruction Chars | Use when |
+|---------|--------:|------------:|------------------:|----------|
+| `full` | 26 | 182 | ~13.1k | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 17 | 136 | ~7.6k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
+| `production` | 15 | 130 | ~10.1k | MIDI instruments, stem bouncing, FX chains, and mixing. Drops arrangement helpers (patterns/loops/chops). |
+| `mixing` | 11 | 83 | ~7.8k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
+| `analysis` | 5 | 57 | ~3.9k | Inspect and measure only. Read-mostly workflow. |
+| `minimal` | 3 | 47 | ~1.7k | Smoke test / basic control surface. |
+
+### Exact Tool Filtering & Custom Profiles
+
+You can further restrict tools or define custom profiles using environment variables or a profile file:
+
+- **Exact Tool Allowlists:** `REAPER_MCP_INCLUDE_TOOLS=track_get_all,fx_get_chain,fx_get_params`
+- **Tool Exclusions:** `REAPER_MCP_EXCLUDE_TOOLS=midi_insert_note`
+- **Module Allowlists / Exclusions:** `REAPER_MCP_INCLUDE_MODULES=...` / `REAPER_MCP_EXCLUDE_MODULES=...`
+- **Custom Profile File:** Set `REAPER_MCP_PROFILE_FILE=path/to/profile.toml` (or `.json`):
+  ```toml
+  name = "audio-automation"
+  include_modules = ["project_tools", "track_tools", "fx_tools"]
+  include_tools = ["project_get_overview", "track_get_all", "fx_get_chain", "fx_get_params"]
+  instruction_packs = ["core", "postproduction"]
+  ```
+
+### Profile Introspection CLI
+
+Inspect registered tools, schema character footprints, and instruction sizes:
+
+```bash
+# Human-readable summary
+reaper-mcp --profile-info mixing
+
+# JSON output
+reaper-mcp --profile-info mixing --json
+```
 
 **How to set it — Claude Desktop / Cursor / any MCP client with env support:**
 
@@ -39,7 +67,7 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 REAPER_MCP_PROFILE=composition reaper-mcp
 ```
 
-On startup the server writes a banner to stderr confirming the active profile and module count. An invalid profile name logs a warning and falls back to `full`.
+On startup the server writes a banner to stderr confirming the active profile, registered tool count, and module count. An invalid profile name logs a warning and falls back to `full`.
 
 ---
 
@@ -60,7 +88,7 @@ On startup the server writes a banner to stderr confirming the active profile an
 | [Envelopes](#envelopes) | `envelope_tools.py` | 3 |
 | [Selection](#selection) | `selection_tools.py` | 9 |
 | [Sends & Routing](#sends--routing) | `send_tools.py` | 8 |
-| [FX](#fx) | `fx_tools.py` | 15 |
+| [FX](#fx) | `fx_tools.py` | 16 |
 | [FX Inventory](#fx-inventory) | `inventory_tools.py` | 2 |
 | [Mix & Master](#mix--master) | `mix_tools.py` | 3 |
 | [Sidechain](#sidechain) | `sidechain_tools.py` | 1 |
@@ -100,8 +128,8 @@ Create, delete, rename, route, colour, freeze, and inspect tracks. Source: `trac
 
 | Tool | Description |
 |------|-------------|
-| `track_get_all()` | List every track with name, volume, pan, mute/solo/arm flags. |
-| `track_get_info(track_index)` | Detailed info for one track. |
+| `track_get_all()` | List every track with name, volume, pan, mute/solo/arm flags, `channel_count` (I_NCHAN), and `sample_filenames`. |
+| `track_get_info(track_index)` | Detailed info for one track, including `channel_count` and `sample_filenames`. |
 | `track_create(index=-1, name="")` | Insert a new track at an index (or append). |
 | `track_delete(track_index)` | Delete a track. |
 | `track_rename(track_index, name)` | Rename a track. |
@@ -281,7 +309,7 @@ Inter-track sends — aux sends, sidechain feeds, parallel buses. Source: `send_
 |------|-------------|
 | `send_create(source_track, dest_track, midi_source_channel=None, midi_dest_channel=None)` | Create a post-fader send. Pass both `midi_*_channel` args (0=all, 1-16, 31=disabled) to also route MIDI to a specific channel — e.g. one channel of a multi-timbral VSTi. Returns the new send index. |
 | `send_remove(track_index, send_index)` | Delete a send. |
-| `send_get_all(track_index)` | List every send on a track, including `midi_source_channel`/`midi_dest_channel`/`midi_enabled`. |
+| `send_get_all(track_index)` | List every send on a track, including `send_mode` (`raw` integer and named mode like `post_fader`, `pre_fader_post_fx`), `audio` channel mapping (`source_channel_raw`, `destination_channel_raw`, and formatted `interpreted` string e.g. `1/2 -> 3/4`), plus `midi_source_channel`/`midi_dest_channel`/`midi_enabled`. |
 | `send_set_volume(track_index, send_index, volume_db)` | Send level in dB. |
 | `send_set_pan(track_index, send_index, pan)` | Send pan (-1 L → 1 R). |
 | `send_set_mute(track_index, send_index, mute)` | Mute a send. |
@@ -290,7 +318,7 @@ Inter-track sends — aux sends, sidechain feeds, parallel buses. Source: `send_
 
 ## FX
 
-Add, remove, configure plugins; read/write parameters; manage presets. Source: `fx_tools.py`.
+Add, remove, configure plugins; read/write parameters; manage presets; inspect pin mappings. Source: `fx_tools.py`.
 
 | Tool | Description |
 |------|-------------|
@@ -300,6 +328,7 @@ Add, remove, configure plugins; read/write parameters; manage presets. Source: `
 | `fx_get_params(track_index, fx_index)` | All parameters of a plugin (index, name, value, min/max). |
 | `fx_set_param(track_index, fx_index, param_index, value)` | Set a parameter by index. |
 | `fx_set_param_by_name(track_index, fx_index, param_name, value)` | Set a parameter by name (fuzzy match). |
+| `fx_scan_params(track_index, fx_index)` | Sweep a plugin's parameters to learn real range/units/step counts and infer response curves. Results are cached on disk by plugin name. |
 | `fx_enable(track_index, fx_index)` | Enable a plugin. |
 | `fx_disable(track_index, fx_index)` | Disable a plugin (bypass). |
 | `fx_show_ui(track_index, fx_index)` | Open the plugin's UI window. |
@@ -309,6 +338,7 @@ Add, remove, configure plugins; read/write parameters; manage presets. Source: `
 | `fx_get_instrument(track_index)` | Detect which VSTi (if any) is on a track. |
 | `fx_move(track_index, fx_index, new_index)` | Reorder plugins within a chain. |
 | `fx_rename(track_index, fx_index, new_name)` | Rename an FX instance's display label (cosmetic — plugin unchanged). Used by the mix engine to tag its own FX with `[MIX] ` so cleanup can find them without touching user-added FX. Requires REAPER 6.37+. |
+| `fx_get_pin_mappings(track_index, fx_index)` | Read-only inspection of an FX plugin's audio input and output pin mappings (connected track channels and raw low/high 32-bit masks). Essential for non-destructively verifying sidechain routing. |
 
 ## FX Inventory
 

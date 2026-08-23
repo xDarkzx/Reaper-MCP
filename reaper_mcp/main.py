@@ -1,4 +1,5 @@
 import ctypes
+import json
 import os
 import sys
 import threading
@@ -35,13 +36,14 @@ from mcp.server.fastmcp import FastMCP
 
 from reaper_mcp.instructions import load_instructions
 from reaper_mcp.reaper_client import ReaperClient
-from reaper_mcp.tool_registry import register_all_tools
+from reaper_mcp.tool_registry import describe_profile, register_all_tools, resolve_profile
 from reaper_mcp_shared.constants import Connection, ensure_private_dir
 
-mcp = FastMCP("ReaperMCP", instructions=load_instructions())
+_active_profile = resolve_profile()
+mcp = FastMCP("ReaperMCP", instructions=load_instructions(_active_profile.instruction_packs))
 client = ReaperClient()
 
-register_all_tools(mcp)
+register_all_tools(mcp, _active_profile)
 
 
 def _generation_file(ppid: int) -> str:
@@ -61,7 +63,7 @@ def _claim_generation(ppid: int) -> None:
         ensure_private_dir(Connection.GENERATION_DIR)
         path = _generation_file(ppid)
         tmp = f"{path}.tmp.{os.getpid()}"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
         os.replace(tmp, path)  # atomic — readers never see a torn write
     except OSError:
@@ -104,7 +106,7 @@ def _superseded(ppid: int) -> bool:
     superseded (this server keeps running rather than guessing itself away).
     """
     try:
-        with open(_generation_file(ppid)) as f:
+        with open(_generation_file(ppid), encoding="utf-8") as f:
             current = int(f.read().strip())
     except (OSError, ValueError):
         return False
@@ -125,13 +127,8 @@ def _parent_alive(ppid: int) -> bool:
             PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, ppid
         )
         if not handle:
-            # Can't open a handle — this can happen for reasons unrelated to
-            # the parent being dead (e.g. the parent runs in a different,
-            # more restrictive security context, such as an MSIX/AppContainer
-            # sandbox). Treat "can't tell" as alive, not dead.
             return True
         try:
-            # WAIT_OBJECT_0 (0) means the process handle is signaled, i.e. exited
             return ctypes.windll.kernel32.WaitForSingleObject(handle, 0) != 0
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
@@ -142,20 +139,6 @@ def _parent_alive(ppid: int) -> bool:
 def _watch_parent(poll_seconds: float = 3.0, confirmations_required: int = 3) -> None:
     """Exit this process once it's no longer needed — self-directed only,
     never touches another process.
-
-    Two independent reasons to retire:
-
-    1. Superseded: the same parent client started a newer server for itself
-       (e.g. it reconnected without stopping this one). Checked every poll;
-       acts immediately since the generation file is authoritative.
-    2. Orphaned: the parent client process itself is gone. Belt-and-braces
-       alongside stdio EOF detection — if the parent's stdio pipes don't
-       propagate EOF cleanly (observed on Windows when the client is
-       force-closed rather than shutting down its child processes), this
-       catches it independently. Requires several consecutive "dead"
-       readings, not just one, before acting — a single transient blip in
-       the OS-level check shouldn't be enough to exit a server that's still
-       actively serving its client.
     """
     ppid = os.getppid()
     consecutive_dead = 0
@@ -173,6 +156,30 @@ def _watch_parent(poll_seconds: float = 3.0, confirmations_required: int = 3) ->
 
 
 def main():
+    args = sys.argv[1:]
+    if "--profile-info" in args or "profile-info" in args:
+        profile_target = None
+        for i, a in enumerate(args):
+            if a in ("--profile", "-p") and i + 1 < len(args):
+                profile_target = args[i + 1]
+            elif a.startswith("--profile="):
+                profile_target = a.split("=", 1)[1]
+            elif a not in ("--profile-info", "profile-info", "--json") and not a.startswith("-"):
+                profile_target = a
+
+        info = describe_profile(profile_target)
+        if "--json" in args:
+            print(json.dumps(info.to_dict(), indent=2))
+        else:
+            print(f"Profile: {info.name}")
+            print(f"Tools registered: {info.tool_count}")
+            print(f"Tool schema chars: {info.tool_schema_chars}")
+            print(f"Instruction chars: {info.instruction_chars}")
+            print(f"Instruction packs: {', '.join(info.instruction_packs)}")
+            print(f"Modules ({len(info.modules)}): {', '.join(info.modules)}")
+            print(f"Tools ({len(info.tools)}): {', '.join(info.tools)}")
+        sys.exit(0)
+
     _claim_generation(os.getppid())
     threading.Thread(target=_watch_parent, daemon=True).start()
     mcp.run(transport="stdio")

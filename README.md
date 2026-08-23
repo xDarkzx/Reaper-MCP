@@ -9,7 +9,7 @@
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-purple.svg" alt="MCP Compatible" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.3-orange.svg" alt="v0.6.3" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.7-orange.svg" alt="v0.6.7" /></a>
   <a href="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml"><img src="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://www.reaper.fm/"><img src="https://img.shields.io/badge/REAPER-7%2B-red.svg" alt="REAPER 7+" /></a>
   <a href="https://discord.gg/BGn8Ujh37m"><img src="https://img.shields.io/discord/1530363483701510154?label=discord&logo=discord&color=5865F2" alt="Discord" /></a>
@@ -34,7 +34,7 @@
 
 ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
-**180 tools across 26 modules** cover the full workflow: MIDI composition and patterns, a vocal-chop pipeline, FX and automatic genre-tuned mixing/mastering (35 style profiles), sends and routing, and post-production QC — batch editing, ReaScript automation, silence/click detection.
+**182 tools across 26 modules** cover the full workflow: MIDI composition and patterns, a vocal-chop pipeline, FX and automatic genre-tuned mixing/mastering (35 style profiles), sends and routing, and post-production QC — batch editing, ReaScript automation, silence/click detection.
 
 **No cloud. Nothing leaves your machine.** ReaperMCP runs entirely locally through a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI stay on your computer. Bring whatever AI client you already use (Claude Desktop, Claude Code, Cursor, any MCP client) — ReaperMCP handles REAPER.
 

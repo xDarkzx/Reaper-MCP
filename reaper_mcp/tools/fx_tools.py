@@ -361,3 +361,32 @@ def register(mcp: FastMCP):
             "fx_rename",
             track_index=track_index, fx_index=fx_index, new_name=new_name,
         )
+
+    @mcp.tool()
+    async def fx_get_pin_mappings(track_index: int, fx_index: int) -> dict:
+        """Read-only inspection of an FX plugin's audio input and output pin mappings.
+
+        Returns the track channels wired to each FX pin via TrackFX_GetPinMappings.
+        Use this to verify existing sidechain routing without modifying anything —
+        e.g. confirm that Pro-Q 4's sidechain input pins are receiving channels 3/4
+        before running automated parameter optimisation.
+
+        Each pin entry includes:
+          - ``pin`` — 0-based pin index
+          - ``track_channels`` — list of 1-based track channel numbers connected
+          - ``low32_raw`` / ``high32_raw`` — raw bitmasks for full lossless round-trips
+
+        Requires REAPER >= 6.0 (TrackFX_GetPinMappings).
+
+        Args:
+            track_index: 0-based track index.
+            fx_index: 0-based FX chain index.
+        """
+        if track_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        if fx_index < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
+        return await client.execute(
+            "fx_get_pin_mappings",
+            track_index=track_index, fx_index=fx_index,
+        )
