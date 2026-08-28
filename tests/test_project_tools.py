@@ -5,29 +5,34 @@ extracted from project_export_audio so the directory-splitting and
 stems-vs-master filename-pattern selection is directly testable.
 """
 
+import os
+
 from reaper_mcp_shared.constants import ALLOWED_EXPORT_FORMATS
 from reaper_mcp.tools.project_tools import _resolve_render_output, _RENDER_FORMAT_CODES
 
 
 class TestResolveRenderOutput:
     def test_master_uses_paths_own_filename(self):
-        directory, pattern = _resolve_render_output(
-            r"D:\Mixes\song_final.wav", source="master", pattern="",
-        )
-        assert directory == r"D:\Mixes"
+        # Built with os.path.join instead of a hardcoded separator so this
+        # exercises the real split behavior on whatever OS runs it — a
+        # literal Windows path (backslashes) passed CI on Windows locally
+        # but failed on Linux/macOS, where os.path treats '\' as a plain
+        # character, not a separator, so the whole string reads as one
+        # filename with no directory component.
+        path = os.path.join("Mixes", "song_final.wav")
+        directory, pattern = _resolve_render_output(path, source="master", pattern="")
+        assert directory == "Mixes"
         assert pattern == "song_final.wav"
 
     def test_stems_ignores_filename_uses_pattern(self):
-        directory, pattern = _resolve_render_output(
-            r"D:\Mixes\ignored.wav", source="stems", pattern="$track",
-        )
-        assert directory == r"D:\Mixes"
+        path = os.path.join("Mixes", "ignored.wav")
+        directory, pattern = _resolve_render_output(path, source="stems", pattern="$track")
+        assert directory == "Mixes"
         assert pattern == "$track"
 
     def test_stems_with_no_pattern_defaults_to_dollar_track(self):
-        directory, pattern = _resolve_render_output(
-            r"D:\Mixes\ignored.wav", source="stems", pattern="",
-        )
+        path = os.path.join("Mixes", "ignored.wav")
+        directory, pattern = _resolve_render_output(path, source="stems", pattern="")
         assert pattern == "$track"
 
     def test_path_with_no_directory_component_defaults_to_dot(self):
