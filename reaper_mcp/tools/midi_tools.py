@@ -118,7 +118,14 @@ def register(mcp: FastMCP):
                     ErrorCode.VALUE_OUT_OF_RANGE,
                     f"note[{i}].channel must be 0-15, got {n['channel']!r}",
                 )
-        return await client.execute("midi_insert_notes_batch",
+        # Up to MAX_NOTES_PER_TRACK (10000) notes in one call — REAPER inserts
+        # them synchronously on its single main thread (UI freezes meanwhile),
+        # which can comfortably exceed the short 30s command timeout for large
+        # batches. Use the long-command budget so Python actually waits for
+        # REAPER to finish instead of giving up while the insert is still
+        # running — a premature timeout here doesn't cancel the Lua-side work,
+        # it just stops listening for the response.
+        return await client.execute_long("midi_insert_notes_batch",
                                     track_index=track_index, item_index=item_index, notes=notes)
 
     @mcp.tool()

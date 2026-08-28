@@ -180,6 +180,21 @@ def _ipc_mutex(timeout: float):
         fd.close()
 
 
+def _is_stale_response(resp_id, req_id: str) -> bool:
+    """True if a parsed response belongs to an earlier, already-abandoned
+    command rather than the one currently being awaited.
+
+    Extracted from the polling loop in ``_send_command_locked`` so the
+    id-correlation decision — the actual fix for the stale-response bug —
+    is unit-testable without file I/O or REAPER.
+
+    A response with no id at all is from a Lua bridge that hasn't been
+    reloaded since this fix shipped — treated as NOT stale (accept it
+    unconditionally) rather than discarded forever.
+    """
+    return resp_id is not None and resp_id != req_id
+
+
 def _is_wsl() -> bool:
     """True if this Python process is running inside WSL (not native Windows).
 
@@ -292,8 +307,15 @@ class ReaperClient:
         self._cleanup_files()
         t1 = time.monotonic()
 
-        # Write command atomically
-        msg = json.dumps({"command": command, "params": params})
+        # Write command atomically. The id lets us detect a stale response
+        # left behind by an earlier command this client already gave up on
+        # (timed out waiting for) — REAPER's Lua dispatch loop is single-
+        # threaded and fully synchronous per command, so if that earlier
+        # command was still running when we timed out, it keeps running and
+        # eventually writes ITS result to response.json, which would
+        # otherwise be silently misread as the answer to this command.
+        req_id = uuid.uuid4().hex
+        msg = json.dumps({"command": command, "params": params, "id": req_id})
         with open(Connection.COMMAND_TMP, "w", encoding="utf-8") as f:
             f.write(msg)
         os.replace(Connection.COMMAND_TMP, Connection.COMMAND_FILE)
@@ -322,6 +344,14 @@ class ReaperClient:
                     if raw.strip():
                         try:
                             result = json.loads(raw)
+                            resp_id = result.get("id")
+                            if _is_stale_response(resp_id, req_id):
+                                try:
+                                    os.remove(Connection.RESPONSE_FILE)
+                                except OSError:
+                                    pass
+                                time.sleep(Timeouts.POLL_INTERVAL)
+                                continue
                             try:
                                 os.remove(Connection.RESPONSE_FILE)
                             except OSError:

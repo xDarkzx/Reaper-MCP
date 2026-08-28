@@ -2,6 +2,40 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`midi_insert_notes_batch` was O(n²) for large batches**: the Lua handler
+  called `MIDI_InsertNote(..., noSortIn=false)` inside the per-note loop,
+  forcing REAPER to re-sort the take's entire note buffer after every single
+  note instead of once at the end — every other bulk-insert site in the Lua
+  bridge (`compose_arrangement`, `compose_single_track`, `edit_section`)
+  already passed `noSortIn=true`; this one didn't. A few minutes of MIDI
+  across multiple tracks could take 5+ minutes to write. Also routed the
+  Python-side tool through the 600s `execute_long` budget instead of the 30s
+  `execute` default — `MAX_NOTES_PER_TRACK` (10000 notes/call) was always
+  large enough to legitimately exceed 30s, and a client-side timeout doesn't
+  cancel the Lua-side insert, it just stops listening for the response.
+- **Same O(n²) resort bug in two more places**: `midi_delete_all_notes` and
+  `edit_section`'s range-delete (notes and CCs) called `MIDI_DeleteNote`/
+  `MIDI_DeleteCC` in a loop with no `MIDI_DisableSort` — those two functions
+  have no `noSortIn` parameter at all, so `MIDI_DisableSort` is the only way
+  to avoid a full resort after every single delete. Both now wrap their
+  delete loops in `MIDI_DisableSort` + one trailing `MIDI_Sort`, matching
+  the pattern already used everywhere else in the file.
+- **IPC responses had no request/response correlation**: `command.json` /
+  `response.json` were matched purely by being "the next file there," with
+  no id tying a response to the command that asked for it. REAPER's Lua
+  dispatch loop is single-threaded and fully synchronous per command — if
+  the Python client times out and gives up on a slow command, the Lua side
+  keeps running it to completion regardless, and its eventual response could
+  get silently misread as the answer to a *later, unrelated* command sent in
+  the meantime. Commands now carry a UUID the Lua bridge echoes back;
+  responses whose id doesn't match the in-flight request are discarded as
+  stale rather than accepted. Backward-compatible: a response with no id at
+  all (an old, not-yet-reloaded Lua bridge) is still accepted unconditionally.
+
 ## [0.6.7] - 2026-08-24
 
 ### Added

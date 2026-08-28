@@ -1,12 +1,13 @@
-"""Tests for ReaperClient's heartbeat-staleness crash detection.
+"""Tests for ReaperClient's heartbeat-staleness crash detection and
+request/response id correlation.
 
-Pure logic against a real temp file's mtime — no REAPER/IPC needed.
+Pure logic — no REAPER/IPC needed.
 """
 
 import os
 import time
 
-from reaper_mcp.reaper_client import ReaperClient
+from reaper_mcp.reaper_client import ReaperClient, _is_stale_response
 from reaper_mcp_shared.constants import Connection
 
 
@@ -49,3 +50,19 @@ class TestHeartbeatStale:
 
         client = ReaperClient.__new__(ReaperClient)
         assert client._heartbeat_stale() is False
+
+
+class TestIsStaleResponse:
+    def test_matching_id_is_not_stale(self):
+        assert _is_stale_response("abc123", "abc123") is False
+
+    def test_mismatched_id_is_stale(self):
+        # The actual bug this fixes: a late response from a command this
+        # client already gave up on must not be accepted as the answer to
+        # a different, currently in-flight command.
+        assert _is_stale_response("old-command-id", "new-command-id") is True
+
+    def test_response_with_no_id_is_not_stale(self):
+        # Backward compat: an old, not-yet-reloaded Lua bridge never sends
+        # an id at all. Must be accepted, not discarded forever.
+        assert _is_stale_response(None, "new-command-id") is False
