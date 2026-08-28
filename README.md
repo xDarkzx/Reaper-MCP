@@ -9,7 +9,7 @@
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-purple.svg" alt="MCP Compatible" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.7-orange.svg" alt="v0.6.7" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.7.0-orange.svg" alt="v0.7.0" /></a>
   <a href="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml"><img src="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://www.reaper.fm/"><img src="https://img.shields.io/badge/REAPER-7%2B-red.svg" alt="REAPER 7+" /></a>
   <a href="https://discord.gg/BGn8Ujh37m"><img src="https://img.shields.io/discord/1530363483701510154?label=discord&logo=discord&color=5865F2" alt="Discord" /></a>

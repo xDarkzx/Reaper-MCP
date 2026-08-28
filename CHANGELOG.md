@@ -2,7 +2,22 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-08-29
+
+### Added
+
+- **`project_export_audio` now does real, configurable rendering**: previously
+  it silently ignored its own `path`/`format` arguments and just opened
+  REAPER's raw render-dialog action — nothing on disk reflected what was
+  asked for. Now wires up `RENDER_FILE`/`RENDER_PATTERN`/`RENDER_FORMAT`/
+  `RENDER_SETTINGS` for real, triggered headlessly (no blocking dialog).
+  Two new modes: `source="master"` (one mixed-down file, as before) and
+  `source="stems"` (one file per track in `track_indices`, e.g. for
+  per-layer game-audio exports into FMOD/Wwise). Verified end-to-end
+  against a real project, including a REAPER-native edge case where a
+  track name containing `/` or `\` silently splits `$track`-pattern output
+  into a subfolder instead of one file — now caught with a clear error
+  naming the offending track instead of producing broken output.
 
 ### Fixed
 
