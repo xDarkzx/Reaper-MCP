@@ -1,7 +1,45 @@
+import json
+import os
+
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.constants import ALLOWED_EXPORT_FORMATS
 from reaper_mcp_shared.path_safety import safe_path as _safe_path
+
+# REAPER's RENDER_FORMAT project-info string takes a 4-byte format tag, not
+# a plain extension — and confirmed empirically against a live REAPER
+# instance (an "invalid format" error on the forward form) that the tag
+# must be byte-reversed from the format's own fourCC (e.g. "wave" -> "evaw")
+# to be accepted as a write. Keys must stay in sync with ALLOWED_EXPORT_FORMATS
+# — see TestRenderFormatCodes.test_covers_every_allowed_export_format.
+_RENDER_FORMAT_CODES = {
+    "wav": "evaw",
+    "mp3": "l3pm",
+    "ogg": "vggo",
+    "flac": "calf",
+    "aiff": "ffia",
+}
+
+
+def _resolve_render_output(path: str, source: str, pattern: str) -> tuple:
+    """Split an export path into (render_dir, render_pattern) for REAPER's
+    RENDER_FILE/RENDER_PATTERN project info strings.
+
+    Pure logic, extracted from ``project_export_audio`` so the directory-
+    splitting and stems-vs-master pattern selection is unit-testable
+    without REAPER.
+
+    For source="master", the pattern is the path's own filename (one file).
+    For source="stems", the filename portion of `path` is ignored — stems
+    produce multiple files, not one — and `pattern` (e.g. "$track") is used
+    instead, defaulting to "$track" if not supplied.
+    """
+    directory, filename = os.path.split(path)
+    if not directory:
+        directory = "."
+    if source == "stems":
+        return directory, (pattern or "$track")
+    return directory, filename
 
 # Per-field byte cap for project render metadata. Tags are short descriptors;
 # anything approaching 1 KB almost certainly means wrong data was piped in.
@@ -129,12 +167,28 @@ def register(mcp: FastMCP):
         return await client.execute("project_backup", path=path)
 
     @mcp.tool()
-    async def project_export_audio(path: str, format: str = "wav") -> dict:
-        """Render project to audio file.
+    async def project_export_audio(
+        path: str,
+        format: str = "wav",
+        source: str = "master",
+        track_indices: str = "",
+        pattern: str = "",
+    ) -> dict:
+        """Render project to audio file(s) on disk.
 
         Args:
-            path: Output file path.
+            path: Output file path. For source="master" this is the exact
+                output file. For source="stems" only its directory is used —
+                each stem's filename comes from `pattern` instead, since
+                stems produce multiple files, not one.
             format: wav, mp3, ogg, flac, or aiff.
+            source: "master" (default) renders one mixed-down file.
+                "stems" renders one file per track in `track_indices`.
+            track_indices: JSON array of track indices to render as stems,
+                e.g. "[0,1,2]". Required when source="stems", ignored otherwise.
+            pattern: Filename pattern for stems, e.g. "$track" (the default
+                when source="stems" and pattern isn't given). Ignored for
+                source="master", which uses path's own filename instead.
         """
         fmt = format.lower()
         if fmt not in ALLOWED_EXPORT_FORMATS:
@@ -142,8 +196,37 @@ def register(mcp: FastMCP):
                 ErrorCode.INVALID_FORMAT,
                 f"Format must be one of: {', '.join(sorted(ALLOWED_EXPORT_FORMATS))}",
             )
+        if source not in ("master", "stems"):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "source must be 'master' or 'stems'")
+
         path = _safe_path(path)
-        return await client.execute_long("project_export_audio", path=path, format=fmt)
+        render_dir, render_pattern = _resolve_render_output(path, source, pattern)
+
+        if source == "stems":
+            if not track_indices:
+                raise ReaperMCPError(
+                    ErrorCode.MISSING_PARAMETER,
+                    "track_indices is required when source='stems'",
+                )
+            try:
+                src_list = json.loads(track_indices)
+            except (json.JSONDecodeError, TypeError) as e:
+                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER,
+                                     f"track_indices must be JSON array: {e}")
+            if not isinstance(src_list, list) or not src_list:
+                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER,
+                                     "track_indices must be a non-empty array")
+            await client.execute("selection_deselect_all_tracks")
+            for ti in src_list:
+                await client.execute("track_select", track_index=int(ti), selected=True)
+
+        return await client.execute_long(
+            "project_export_audio",
+            render_dir=render_dir,
+            render_pattern=render_pattern,
+            format_code=_RENDER_FORMAT_CODES[fmt],
+            source=source,
+        )
 
     @mcp.tool()
     async def project_undo() -> dict:

@@ -324,8 +324,10 @@ end
 -- Response helpers (with error checking on file I/O)
 -- ============================================================
 
-local function send_success(data)
-  local resp = json_encode(data and {success = true, data = data} or {success = true})
+local function send_success(data, id)
+  local resp_table = data and {success = true, data = data} or {success = true}
+  if id then resp_table.id = id end
+  local resp = json_encode(resp_table)
   local f, err = io.open(response_tmp, "w")
   if not f then
     reaper.ShowConsoleMsg("ReaperMCP: Failed to write response: " .. tostring(err) .. "\n")
@@ -345,8 +347,10 @@ local function send_success(data)
   end
 end
 
-local function send_error(msg)
-  local resp = json_encode({success = false, error = msg})
+local function send_error(msg, id)
+  local resp_table = {success = false, error = msg}
+  if id then resp_table.id = id end
+  local resp = json_encode(resp_table)
   local f, err = io.open(response_tmp, "w")
   if not f then
     reaper.ShowConsoleMsg("ReaperMCP: Failed to write error response: " .. tostring(err) .. "\n")
@@ -1172,10 +1176,80 @@ function project.project_backup(p)
 end
 
 function project.project_export_audio(p)
-  -- NOTE: This opens REAPER's render dialog. The path/format params from MCP
-  -- are not directly usable — REAPER uses its own render settings.
-  reaper.Main_OnCommand(41824, 0)
-  return {rendered = true, note = "Used REAPER default render settings. Configure render settings in REAPER for specific format/path."}
+  if not p.render_dir then return nil, "Missing parameter: render_dir" end
+  if not p.render_pattern then return nil, "Missing parameter: render_pattern" end
+  if not p.format_code then return nil, "Missing parameter: format_code" end
+  local source = p.source or "master"
+
+  -- Confirmed by real testing (not just docs): REAPER's $track wildcard
+  -- substitutes the raw track name into the filename with no escaping, so
+  -- a track named e.g. "L4 - Intense / Boss" silently splits into a
+  -- subfolder "L4 - Intense " containing "Boss.wav" instead of one file -
+  -- same as it would from REAPER's own render dialog. Fail clearly up
+  -- front for stems instead of letting that surprise the caller.
+  if source == "stems" and p.render_pattern:find("%$track") then
+    local n_sel = reaper.CountSelectedTracks(0)
+    for i = 0, n_sel - 1 do
+      local tr = reaper.GetSelectedTrack(0, i)
+      local _, tname = reaper.GetTrackName(tr)
+      if tname:find("[/\\]") then
+        return nil, "Track name \"" .. tname .. "\" contains / or \\, which "
+          .. "REAPER's $track wildcard turns into a subfolder instead of "
+          .. "part of the filename. Rename the track (or pass an explicit "
+          .. "pattern that doesn't use $track) before rendering stems."
+      end
+    end
+  end
+
+  reaper.GetSetProjectInfo_String(0, "RENDER_FILE", p.render_dir, true)
+  reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", p.render_pattern, true)
+  local format_ok = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", p.format_code, true)
+
+  -- RENDER_SETTINGS is a bitmask; only touch the source-selection bits,
+  -- preserve everything else (2nd-pass render, normalize, etc.) via
+  -- read-modify-write. Values confirmed against cfillion's published
+  -- render-preset script (0x0000 = master mix, 0x0003 = stems of selected
+  -- tracks) after an initial wrong guess (0x0002) rendered a single master
+  -- file instead of stems — verified for real by inspecting rendered files
+  -- on disk, not just by trusting the read-back matched what was sent.
+  -- NOTE: RENDER_SETTINGS is NOT a string-type project info key
+  -- (GetSetProjectInfo_String round-tripped it as "") — it's numeric, so
+  -- this uses GetSetProjectInfo instead.
+  local settings = reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 0, false)
+  local SOURCE_MASK = 0x0003
+  settings = settings & ~SOURCE_MASK
+  if source == "stems" then
+    settings = settings | 0x0003
+  end
+  reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", settings, true)
+
+  -- Read every value straight back from REAPER after writing it, so the
+  -- caller can see exactly what's actually stored, not just what was sent.
+  local _, readback_file = reaper.GetSetProjectInfo_String(0, "RENDER_FILE", "", false)
+  local _, readback_pattern = reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", "", false)
+  local _, readback_format = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
+  local readback_settings = reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 0, false)
+  local n_selected = reaper.CountSelectedTracks(0)
+
+  reaper.Main_OnCommand(42230, 0)  -- render using current settings, no dialog
+  return {
+    rendered = true,
+    source = source,
+    format_ok = format_ok,
+    selected_track_count = n_selected,
+    sent = {
+      render_dir = p.render_dir,
+      render_pattern = p.render_pattern,
+      format_code = p.format_code,
+      render_settings = settings,
+    },
+    readback = {
+      render_file = readback_file,
+      render_pattern = readback_pattern,
+      render_format = readback_format,
+      render_settings = readback_settings,
+    },
+  }
 end
 
 function project.project_undo(p)
@@ -2814,7 +2888,11 @@ function midi.midi_insert_notes_batch(p)
       local ch = math.floor(n.channel or 0)
       local startppq = reaper.MIDI_GetPPQPosFromProjTime(take, n.start)
       local endppq = reaper.MIDI_GetPPQPosFromProjTime(take, n["end"])
-      reaper.MIDI_InsertNote(take, false, false, startppq, endppq, ch, math.floor(n.pitch), math.floor(n.velocity), false)
+      -- noSortIn=true: skip REAPER's per-call resort of the whole note buffer
+      -- (paired with MIDI_DisableSort above + the single MIDI_Sort below) —
+      -- every other bulk-insert site in this file already does this; this
+      -- one was O(n^2) for large batches until fixed.
+      reaper.MIDI_InsertNote(take, false, false, startppq, endppq, ch, math.floor(n.pitch), math.floor(n.velocity), true)
       count = count + 1
     end
   end
@@ -2897,6 +2975,10 @@ function midi.midi_delete_all_notes(p)
   if not take then return nil, err end
   local _, count = reaper.MIDI_CountEvts(take)
   reaper.Undo_BeginBlock()
+  -- MIDI_DeleteNote has no noSortIn param — without DisableSort, REAPER
+  -- resorts the whole note buffer after every single delete (O(n^2) for
+  -- a large item).
+  reaper.MIDI_DisableSort(take)
   for i = count - 1, 0, -1 do reaper.MIDI_DeleteNote(take, i) end
   reaper.MIDI_Sort(take)
   reaper.Undo_EndBlock("MCP: midi_delete_all_notes (" .. count .. " notes)", -1)
@@ -3599,9 +3681,13 @@ function compose.edit_section(p)
         reaper.SetMediaItemInfo_Value(it, "D_LENGTH", start_time - item_pos)
       end
 
-      -- Delete notes in range (iterate backwards to preserve indices)
+      -- Delete notes in range (iterate backwards to preserve indices).
+      -- MIDI_DeleteNote has no noSortIn param — without DisableSort, REAPER
+      -- resorts the whole note buffer after every single delete (O(n^2)
+      -- for an item with many notes/CCs).
       if edit_notes then
         local _, note_count = reaper.MIDI_CountEvts(take)
+        reaper.MIDI_DisableSort(take)
         for ni = note_count - 1, 0, -1 do
           local _, _, _, startppq = reaper.MIDI_GetNote(take, ni)
           local note_time = reaper.MIDI_GetProjTimeFromPPQPos(take, startppq)
@@ -3610,11 +3696,13 @@ function compose.edit_section(p)
             notes_deleted = notes_deleted + 1
           end
         end
+        reaper.MIDI_Sort(take)
       end
 
       -- Delete CCs in range (iterate backwards)
       if edit_ccs then
         local _, _, cc_count = reaper.MIDI_CountEvts(take)
+        reaper.MIDI_DisableSort(take)
         for ci = cc_count - 1, 0, -1 do
           local _, _, _, ppq = reaper.MIDI_GetCC(take, ci)
           local cc_time = reaper.MIDI_GetProjTimeFromPPQPos(take, ppq)
@@ -3623,6 +3711,7 @@ function compose.edit_section(p)
             ccs_deleted = ccs_deleted + 1
           end
         end
+        reaper.MIDI_Sort(take)
       end
 
       -- Insert replacement content into FIRST overlapping item only (avoid duplicates)
@@ -5125,9 +5214,17 @@ local function process_command()
     return
   end
 
+  -- Echoed back in the response so the Python client can tell a genuine
+  -- answer to THIS command apart from a stale response a still-running
+  -- earlier command writes after the client already timed out waiting for
+  -- it (REAPER's dispatch loop is single-threaded/synchronous, so that
+  -- earlier command keeps running to completion regardless of what the
+  -- client decided to do about its own timeout).
+  local req_id = cmd.id
+
   local handler = handlers[cmd.command]
   if not handler then
-    send_error("Unknown command: " .. tostring(cmd.command))
+    send_error("Unknown command: " .. tostring(cmd.command), req_id)
     return
   end
 
@@ -5136,16 +5233,16 @@ local function process_command()
     -- pcall failed — result contains the error message
     local errmsg = "Internal error: " .. tostring(result)
     reaper.ShowConsoleMsg("ReaperMCP: " .. errmsg .. "\n")
-    local sok, serr = pcall(send_error, errmsg)
+    local sok, serr = pcall(send_error, errmsg, req_id)
     if not sok then
       reaper.ShowConsoleMsg("ReaperMCP: Failed to send error response: " .. tostring(serr) .. "\n")
     end
   elseif err then
-    send_error(err)
+    send_error(err, req_id)
   elseif result then
-    send_success(result)
+    send_success(result, req_id)
   else
-    send_error("Command returned no data")
+    send_error("Command returned no data", req_id)
   end
 end
 
