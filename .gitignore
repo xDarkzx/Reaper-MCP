@@ -64,3 +64,9 @@ docs/FUTURE_IDEAS.md
 # Any sibling archive / scratch folders kept locally (root-level only)
 /_archive*/
 /Composer-Engine-Archive/
+
+# Local tool/session artifacts, not project source
+.agents/
+.cookie
+.tmp_song/
+.tmp_song_gen.py
