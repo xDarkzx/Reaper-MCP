@@ -10,7 +10,7 @@ echo.
 
 :: ── Check Python ──────────────────────────────────────────
 echo [1/6] Checking Python...
-python --version >nul 2>&1
+call python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo.
     echo  Python is not installed or not in PATH.
@@ -46,12 +46,12 @@ if %errorlevel% neq 0 (
         exit /b 1
     )
 )
-for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
+for /f "tokens=2" %%v in ('call python --version 2^>^&1') do set PYVER=%%v
 echo   Found Python %PYVER%
 
 :: Verify Python >= 3.10
-for /f %%m in ('python -c "import sys; print(sys.version_info.minor)"') do set PY_MINOR=%%m
-for /f %%M in ('python -c "import sys; print(sys.version_info.major)"') do set PY_MAJOR=%%M
+for /f %%m in ('call python -c "import sys; print(sys.version_info.minor)"') do set PY_MINOR=%%m
+for /f %%M in ('call python -c "import sys; print(sys.version_info.major)"') do set PY_MAJOR=%%M
 if !PY_MAJOR! lss 3 (
     echo.
     echo  ERROR: Python 3.10+ is required, but you have Python %PYVER%
@@ -84,10 +84,10 @@ if defined VIRTUAL_ENV (
 :: Check if pip is available
 echo.
 echo [2/6] Installing reaper-mcp...
-python -m pip --version >nul 2>&1
+call python -m pip --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo   pip not found, installing pip...
-    python -m ensurepip --upgrade >nul 2>&1
+    call python -m ensurepip --upgrade >nul 2>&1
     if !errorlevel! neq 0 (
         echo.
         echo  ERROR: pip is not installed and ensurepip failed.
@@ -107,13 +107,13 @@ if %errorlevel% neq 0 (
 :: (a real, confirmed incident, not a hypothetical). Uninstalling any
 :: old name first guarantees this install starts from a clean slate
 :: regardless of what was here before.
-python -m pip uninstall -y reaper-mcp reapermcp >nul 2>&1
+call python -m pip uninstall -y reaper-mcp reapermcp >nul 2>&1
 
 :: Install from local directory in editable mode, so tool changes in
 :: this checkout take effect without reinstalling - not because the
 :: package isn't on PyPI (it is, as xdarkzx-reaper-mcp).
 pushd "%~dp0"
-python -m pip install -e .
+call python -m pip install -e .
 if %errorlevel% neq 0 (
     echo.
     echo  ERROR: pip install failed. Try running as administrator,
