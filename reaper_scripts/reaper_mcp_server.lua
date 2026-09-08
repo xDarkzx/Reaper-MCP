@@ -2259,6 +2259,21 @@ function item.take_set_reversed(p)
   return {item_index = idx, reversed = true}
 end
 
+-- Item state chunks carry identity that must not be shared between copies:
+-- GUID/IGUID identify the item and its take, and POOLEDEVTS identifies the
+-- MIDI event pool. Handing SetItemStateChunk a verbatim copy of the source
+-- chunk leaves all three shared, so a "copy" of a MIDI item is really a
+-- pooled alias -- editing either one edits both. Regenerate them so every
+-- clone is an independent object.
+local function reguid_item_chunk(chunk)
+  for _, key in ipairs({"GUID", "IGUID", "POOLEDEVTS"}) do
+    chunk = chunk:gsub("([\r\n]%s*" .. key .. " )%b{}", function(prefix)
+      return prefix .. reaper.genGuid("")
+    end)
+  end
+  return chunk
+end
+
 -- Duplicate an item N times at fixed spacing. Each copy preserves the
 -- source, take properties (pitch / playrate / fades / etc.) via
 -- SetItemStateChunk. Default spacing = item length (back-to-back).
@@ -2284,24 +2299,35 @@ function item.item_duplicate(p)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  -- Capture base index so we can hand back the new items' indices.
-  -- AddMediaItemToTrack appends to REAPER's global item list, so the
-  -- new indices are count_before, count_before+1, ... (sequential).
-  local count_before = reaper.CountMediaItems(0)
-
-  local clones = {}
+  local created = {}
   for i = 1, count do
     local new_pos = pos + (i * spacing)
     local new_item = reaper.AddMediaItemToTrack(tr)
     if new_item then
-      reaper.SetItemStateChunk(new_item, chunk, false)
+      reaper.SetItemStateChunk(new_item, reguid_item_chunk(chunk), false)
       reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
-      clones[#clones+1] = {
-        item_index = count_before + (#clones),
-        position = new_pos,
-        length = len,
-      }
+      created[#created+1] = {ptr = new_item, position = new_pos}
     end
+  end
+
+  -- Resolve indices only once every insert is done. GetMediaItem() enumerates
+  -- the project's items in track order, then by position within each track, so
+  -- a new item lands inside its own track's block rather than at the end of
+  -- the list, and each insert shifts the index of everything after it. The
+  -- previous code assumed the clones were appended at CountMediaItems() and
+  -- handed back indices that pointed at unrelated items on later tracks.
+  local index_of = {}
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    index_of[reaper.GetMediaItem(0, i)] = i
+  end
+
+  local clones = {}
+  for _, c in ipairs(created) do
+    clones[#clones+1] = {
+      item_index = index_of[c.ptr],
+      position = c.position,
+      length = len,
+    }
   end
 
   reaper.PreventUIRefresh(-1)
@@ -2309,7 +2335,7 @@ function item.item_duplicate(p)
   reaper.Undo_EndBlock("MCP: item_duplicate x" .. count, -1)
 
   return {
-    source_item_index = idx,
+    source_item_index = index_of[it] or idx,
     copies_created = #clones,
     spacing_sec = spacing,
     clones = clones,
