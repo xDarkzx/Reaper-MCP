@@ -19,6 +19,18 @@ All notable changes to ReaperMCP will be documented in this file.
   resolve their index from a post-insert scan, and `item_clone_to_position`
   reuses the `reguid_item_chunk()` helper `item_duplicate`'s fix introduced.
 
+- **`track_template_apply` left two tracks sharing one `TRACKID`**: same
+  identity class of bug as above, one level up. `track_set_state_chunk`
+  pasted a saved track's full state chunk onto the target track verbatim,
+  including the source track's own `TRACKID`. Verified live: saving track
+  A's state and applying it to track B left track B with track A's exact
+  `TRACKID` — with track A still in the project, two live tracks shared one
+  identity (the field REAPER's region render matrix and other per-track
+  GUID references use to tell tracks apart). `track_set_state_chunk` now
+  regenerates `TRACKID` before applying, the same way item chunks are
+  reguided; verified live again after the fix that the target track gets a
+  fresh id matching neither its own original nor the source's.
+
 ## [0.6.8] - 2026-08-29
 
 ### Added

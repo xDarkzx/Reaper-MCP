@@ -5093,13 +5093,28 @@ function track.track_get_state_chunk(p)
   return {track_index = idx, chunk = chunk}
 end
 
+-- Track chunks carry their own identity the same way item chunks do (see
+-- reguid_item_chunk): TRACKID {guid}. track_template_apply's whole point is
+-- pasting a saved chunk onto a DIFFERENT track than it was saved from, and
+-- SetTrackStateChunk does not regenerate TRACKID on its own - verified live
+-- (saved track A's chunk, applied it to track B, re-read track B's chunk:
+-- TRACKID matched track A's exactly). With the source track still in the
+-- project, that leaves two live tracks sharing one TRACKID, which is the
+-- identity REAPER's region render matrix and other per-track GUID
+-- references use to tell tracks apart.
+local function reguid_track_chunk(chunk)
+  return (chunk:gsub("([\r\n]%s*TRACKID )%b{}", function(prefix)
+    return prefix .. reaper.genGuid("")
+  end))
+end
+
 function track.track_set_state_chunk(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
   if type(p.chunk) ~= "string" or p.chunk == "" then
     return nil, "chunk must be a non-empty string"
   end
-  local ok = reaper.SetTrackStateChunk(tr, p.chunk, false)
+  local ok = reaper.SetTrackStateChunk(tr, reguid_track_chunk(p.chunk), false)
   if not ok then return nil, "SetTrackStateChunk failed" end
   reaper.UpdateArrange()
   return {success = true, track_index = idx}
