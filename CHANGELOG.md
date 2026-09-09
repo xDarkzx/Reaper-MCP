@@ -2,6 +2,23 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`item_clone_to_position` and `chops_create_virtual_slice` had the same two
+  defects reported and fixed in `item_duplicate` (#30/#31)**, found in a
+  hardening pass after that fix landed: both returned a pre-insert
+  `CountMediaItems()` as the new item's index, which is wrong as soon as
+  there's an item on any later track — exactly the scenario `chop_pipeline`
+  and `stack_chop_layers` create by placing chops and harmony layers across
+  multiple tracks in a loop. `item_clone_to_position` also copied the source
+  item's state chunk verbatim, so a pitch-shifted MIDI harmony layer from
+  `stack_chop_layers` would silently alias the source's `POOLEDEVTS` MIDI
+  event pool — editing one layer's notes would edit them all. Both now
+  resolve their index from a post-insert scan, and `item_clone_to_position`
+  reuses the `reguid_item_chunk()` helper `item_duplicate`'s fix introduced.
+
 ## [0.6.8] - 2026-08-29
 
 ### Added

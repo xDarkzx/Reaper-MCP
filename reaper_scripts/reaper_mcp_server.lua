@@ -2418,7 +2418,6 @@ function item.chops_create_virtual_slice(p)
 
   reaper.Undo_BeginBlock()
 
-  local count_before = reaper.CountMediaItems(0)
   local new_item = reaper.AddMediaItemToTrack(target_track)
   if not new_item then
     reaper.Undo_EndBlock("MCP: chops_create_virtual_slice (fail)", -1)
@@ -2463,9 +2462,22 @@ function item.chops_create_virtual_slice(p)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("MCP: chops_create_virtual_slice", -1)
 
+  -- Resolve the real index after the insert, same reasoning as
+  -- item_duplicate: GetMediaItem() enumerates by track then position, so
+  -- a pre-insert global count does not identify the new item once there
+  -- are items on any later track - and chop_pipeline places chops and
+  -- their harmony layers on different tracks in the same loop.
+  local new_item_index = -1
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    if reaper.GetMediaItem(0, i) == new_item then
+      new_item_index = i
+      break
+    end
+  end
+
   return {
     source_item_index = src_idx,
-    new_item_index = count_before,
+    new_item_index = new_item_index,
     target_track_index = tr_idx,
     target_position_sec = target_pos,
     source_offset_sec = p.source_offset_sec,
@@ -2504,13 +2516,14 @@ function item.item_clone_to_position(p)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  local count_before = reaper.CountMediaItems(0)
   local new_item = reaper.AddMediaItemToTrack(target_track)
-  local new_idx = -1
   if new_item then
-    reaper.SetItemStateChunk(new_item, chunk, false)
+    -- Same identity issue item_duplicate had: a verbatim chunk copy shares
+    -- GUID/IGUID/POOLEDEVTS with the source, so stack_chop_layers' pitch-
+    -- shifted harmony layers would silently alias one MIDI event pool -
+    -- editing one layer's notes would edit all of them.
+    reaper.SetItemStateChunk(new_item, reguid_item_chunk(chunk), false)
     reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", target_pos)
-    new_idx = count_before
   end
 
   reaper.PreventUIRefresh(-1)
@@ -2518,6 +2531,18 @@ function item.item_clone_to_position(p)
   reaper.Undo_EndBlock("MCP: item_clone_to_position", -1)
 
   if not new_item then return nil, "Failed to clone item" end
+
+  -- Resolve the real index after the insert, same reasoning as
+  -- item_duplicate: GetMediaItem() enumerates by track then position, so
+  -- a pre-insert global item count does not identify the new item once
+  -- there are items on any later track.
+  local new_idx = -1
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    if reaper.GetMediaItem(0, i) == new_item then
+      new_idx = i
+      break
+    end
+  end
 
   return {
     source_item_index = idx,
