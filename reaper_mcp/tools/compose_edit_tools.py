@@ -329,14 +329,15 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     async def setup_fx_chain(tracks: str) -> dict:
-        """Batch add and/or configure FX across any number of tracks in one
-        call — this is the tool for both "add several plugins and set their
-        params" AND "set many params on FX I already added," across
-        multiple tracks/bands at once. Reach for this instead of chaining
-        individual fx_add/fx_set_param/fx_set_param_by_name calls — setting
-        up one FabFilter Pro-Q 3 EQ band properly (Used, Enabled, Frequency,
-        Gain, Shape) is 4-5 separate single-param calls done that way; here
-        it's one `fx_chain` entry.
+        """Add and/or configure FX — the only tool for this, for one plugin
+        on one track just as much as many plugins across many tracks. There
+        is no separate single-shot "add one FX" or "set one param" tool:
+        a single `fx_chain` entry with one track is exactly as simple as
+        those would be, and this is the only path that writes params in the
+        order some plugins require — e.g. FabFilter Pro-Q 3/Pro-C 2 need a
+        band's Used/Enabled flag written before its other params (Frequency,
+        Gain, Shape, ...), or the write has no audible effect and silently
+        looks like it didn't work.
 
         Params are applied in a fixed, deterministic order (not raw dict
         iteration order) specifically because some plugins (confirmed:
@@ -345,7 +346,7 @@ def register(mcp: FastMCP):
         need to sequence params yourself.
 
         Example — add the same plugin (e.g. an EQ) to 5 different tracks in
-        one call, instead of 5 separate fx_add calls:
+        one call:
         ```json
         [
             {"track_index": 0, "fx_chain": [{"name": "FabFilter Pro-Q 3"}]},
@@ -384,11 +385,11 @@ def register(mcp: FastMCP):
                   that plugin instead of adding a duplicate;
                   `"add_mode": "find_only"` fails if it's not already there.
                 - `"fx_index": int` — target an FX that's already in the
-                  chain (from an earlier fx_add/setup_fx_chain call, or
-                  already present in the project) instead of adding one.
+                  chain (from an earlier setup_fx_chain call, or already
+                  present in the project) instead of adding one.
                 - `"params": {name: value}` — set params by fuzzy name
                   match (e.g. `"Band 1 Frequency"`). Values 0.0-1.0
-                  normalized, same as fx_set_param.
+                  normalized.
                 - `"params_by_index": {"<index>": value}` — same, by exact
                   0-based param index (keys are strings — JSON object keys
                   always are). Skips the per-param name lookup.

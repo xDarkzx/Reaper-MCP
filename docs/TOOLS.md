@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **182 tools across 26 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **179 tools across 27 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,10 +12,10 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Exact Tools | Instruction Chars | Use when |
 |---------|--------:|------------:|------------------:|----------|
-| `full` | 26 | 182 | ~13.1k | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `full` | 27 | 179 | ~13.2k | Default. You're on Claude / GPT-4 / Gemini-class models. |
 | `composition` | 17 | 136 | ~7.6k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
-| `production` | 15 | 130 | ~10.1k | MIDI instruments, stem bouncing, FX chains, and mixing. Drops arrangement helpers (patterns/loops/chops). |
-| `mixing` | 11 | 83 | ~7.8k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
+| `production` | 16 | 136 | ~10.1k | MIDI instruments, stem bouncing, FX chains (`setup_fx_chain`/`setup_effect_bus`), and mixing. Drops arrangement helpers (patterns/loops/chops). |
+| `mixing` | 11 | 80 | ~7.8k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
 | `analysis` | 5 | 57 | ~3.9k | Inspect and measure only. Read-mostly workflow. |
 | `minimal` | 3 | 47 | ~1.7k | Smoke test / basic control surface. |
 
@@ -318,16 +318,13 @@ Inter-track sends — aux sends, sidechain feeds, parallel buses. Source: `send_
 
 ## FX
 
-Add, remove, configure plugins; read/write parameters; manage presets; inspect pin mappings. Source: `fx_tools.py`.
+Remove, configure plugins; read parameters; manage presets; inspect pin mappings. Adding plugins and writing parameters is `setup_fx_chain` (see Compose/Edit) — always, even for one plugin on one track: it applies params in the order some plugins require (confirmed: FabFilter Pro-Q 3/Pro-C 2 need a band's Used/Enabled flag written before its other params, or the write has no audible effect), which the removed single-shot `fx_add`/`fx_set_param`/`fx_set_param_by_name` did not. Source: `fx_tools.py`.
 
 | Tool | Description |
 |------|-------------|
-| `fx_add(track_index, fx_name)` | Add a plugin to a track by name (fuzzy match). |
 | `fx_remove(track_index, fx_index)` | Remove the plugin at an FX-chain slot. |
 | `fx_get_chain(track_index)` | List every plugin in the track's FX chain. |
 | `fx_get_params(track_index, fx_index)` | All parameters of a plugin (index, name, value, min/max). |
-| `fx_set_param(track_index, fx_index, param_index, value)` | Set a parameter by index. |
-| `fx_set_param_by_name(track_index, fx_index, param_name, value)` | Set a parameter by name (fuzzy match). |
 | `fx_scan_params(track_index, fx_index)` | Sweep a plugin's parameters to learn real range/units/step counts and infer response curves. Results are cached on disk by plugin name. |
 | `fx_enable(track_index, fx_index)` | Enable a plugin. |
 | `fx_disable(track_index, fx_index)` | Disable a plugin (bypass). |

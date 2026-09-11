@@ -32,7 +32,7 @@ def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool
             raise ReaperMCPError(
                 ErrorCode.VALUE_OUT_OF_RANGE,
                 f"point[{index}]: FX param envelope value must be 0.0-1.0 normalized "
-                f"(same as fx_set_param), got {value!r}",
+                f"(same as setup_fx_chain's params/params_by_index), got {value!r}",
             )
     elif envelope_name in _GAIN_ENVELOPES:
         if value < 0:
@@ -117,7 +117,7 @@ def register(mcp: FastMCP):
                               0.5 ≈ -6 dB. Use 10**(db/20) to convert from dB.
           - Pan: -1.0 (hard left) to +1.0 (hard right).
           - Mute: 0.0 or 1.0.
-          - FX params: 0.0-1.0 normalized (same as fx_set_param).
+          - FX params: 0.0-1.0 normalized (same as setup_fx_chain's params/params_by_index).
 
         Args:
             track_index: Track.

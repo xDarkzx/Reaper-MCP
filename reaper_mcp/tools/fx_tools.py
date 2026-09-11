@@ -8,30 +8,6 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
-    async def fx_add(track_index: int, fx_name: str) -> dict:
-        """Add FX plugin to track. Prefer setup_fx_chain for batch operations.
-
-        The name is passed straight to REAPER's TrackFX_AddByName, which
-        resolves it fuzzily. Plugin format cannot be selected: pass the bare
-        name only. The display prefixes from fx_list_installed ("VSTi: ",
-        "VST3i: ") are not format selectors — they are matched as part of the
-        fuzzy string and silently resolve to whichever format REAPER prefers,
-        normally VST3. REAPER's own "vst:"/"vst3:" prefixes and the raw .dll
-        filename both fail outright with FX not found. So when a plugin is
-        installed as both VST2 and VST3, fx_list_installed will list both but
-        only one is reachable here.
-
-        Args:
-            track_index: 0-based track index.
-            fx_name: Bare plugin name (e.g. "ReaEQ", "ReaComp", "ARIA Player").
-        """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
-        if not fx_name:
-            raise ReaperMCPError(ErrorCode.MISSING_PARAMETER, "fx_name cannot be empty")
-        return await client.execute("fx_add", track_index=track_index, fx_name=fx_name)
-
-    @mcp.tool()
     async def fx_remove(track_index: int, fx_index: int) -> dict:
         """Remove FX from track chain.
 
@@ -72,54 +48,6 @@ def register(mcp: FastMCP):
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_get_params", track_index=track_index, fx_index=fx_index)
-
-    @mcp.tool()
-    async def fx_set_param(track_index: int, fx_index: int, param_index: int, value: float) -> dict:
-        """Set FX parameter by index. Prefer setup_fx_chain for batch operations.
-
-        Args:
-            track_index: 0-based track index.
-            fx_index: 0-based FX chain index.
-            param_index: 0-based parameter index.
-            value: 0.0-1.0 normalized.
-        """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
-        if fx_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
-        if param_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "param_index must be >= 0")
-        if not 0.0 <= value <= 1.0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "Value must be 0.0 to 1.0")
-        return await client.execute(
-            "fx_set_param",
-            track_index=track_index, fx_index=fx_index,
-            param_index=param_index, value=value,
-        )
-
-    @mcp.tool()
-    async def fx_set_param_by_name(track_index: int, fx_index: int, param_name: str, value: float) -> dict:
-        """Set FX parameter by name (fuzzy match).
-
-        Args:
-            track_index: 0-based track index.
-            fx_index: 0-based FX chain index.
-            param_name: Parameter name or partial match.
-            value: 0.0-1.0 normalized.
-        """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
-        if fx_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
-        if not param_name:
-            raise ReaperMCPError(ErrorCode.MISSING_PARAMETER, "param_name cannot be empty")
-        if not 0.0 <= value <= 1.0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "Value must be 0.0 to 1.0")
-        return await client.execute(
-            "fx_set_param_by_name",
-            track_index=track_index, fx_index=fx_index,
-            param_name=param_name, value=value,
-        )
 
     @mcp.tool()
     async def fx_scan_params(track_index: int, fx_index: int) -> dict:

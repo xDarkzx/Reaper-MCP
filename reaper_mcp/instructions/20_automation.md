@@ -21,7 +21,7 @@ the track instead of resetting it to "no automation."
 
 Pan is -1.0 (hard left) to 1.0 (hard right) — already the "natural" scale,
 no conversion needed. Mute is 0.0 or 1.0. FX param envelopes are 0.0-1.0
-normalized, same as `fx_set_param`.
+normalized, same as `setup_fx_chain`'s `params`/`params_by_index`.
 
 After writing automation, verify with `envelope_get_points` before telling
 the user it's done — don't assume the write matched intent.

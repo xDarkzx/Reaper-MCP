@@ -4,6 +4,24 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **`fx_add`, `fx_set_param`, and `fx_set_param_by_name` are no longer
+  exposed as tools.** `setup_fx_chain` already covered every case these
+  handled — including a single plugin on a single track — with strictly
+  more safety: it applies params in the order some plugins require
+  (confirmed: FabFilter Pro-Q 3/Pro-C 2 need a band's Used/Enabled flag
+  written before its other params, or the write has no audible effect).
+  Traced live: an AI session used the single-shot tools directly, hit
+  exactly that ordering gap on a fresh Pro-Q 3 band, and misdiagnosed the
+  silent no-op as "needs the plugin UI open" — it doesn't; headless writes
+  work fine, verified against a real REAPER instance. Also fixed the
+  `production` tool profile, which was missing `compose_edit_tools` (the
+  module `setup_fx_chain`/`setup_effect_bus` live in) despite its own
+  description promising FX-chain support — that gap is what put the AI
+  session on the single-shot tools in the first place. The underlying Lua
+  handlers are untouched (still used internally, e.g. by `demo_tools`).
+
 ### Fixed
 
 - **`item_clone_to_position` and `chops_create_virtual_slice` had the same two
