@@ -30,6 +30,45 @@ from reaper_mcp_shared.path_safety import safe_path
 
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".aif", ".aiff", ".ogg", ".m4a"}
 
+# When a query/bpm/role filter is active, max_files caps MATCHES, not files
+# visited - the walk needs to look past however many non-matching files it
+# takes to find them, e.g. searching a 30,000-file library. This bounds
+# worst case walk time when a filter matches rarely or not at all.
+_MAX_SCAN_ENTRIES = 50_000
+
+_MAX_SUBFOLDERS = 2000
+
+
+def _walk_subfolders(root: Path, max_depth: int) -> tuple[list[dict], bool]:
+    """List subfolders under root up to max_depth, each with a cheap audio
+    file count (from directory entries already being enumerated - no
+    stat/duration/metadata work per file). Depth 0 = root's immediate
+    children only. Returns (folders, truncated).
+    """
+    folders: list[dict] = []
+    truncated = False
+    root_depth = len(root.parts)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        depth = len(current.parts) - root_depth
+        if depth >= max_depth:
+            dirnames[:] = []  # don't descend further
+        if current == root:
+            continue
+        if len(folders) >= _MAX_SUBFOLDERS:
+            truncated = True
+            break
+        audio_count = sum(1 for f in filenames if Path(f).suffix.lower() in AUDIO_EXTS)
+        folders.append({
+            "path": str(current),
+            "relative_path": str(current.relative_to(root)),
+            "audio_file_count": audio_count,
+        })
+
+    folders.sort(key=lambda f: f["relative_path"])
+    return folders, truncated
+
 # Role classification — maps loop filename keywords to a canonical role.
 # Order matters: first match wins, so put specific before generic.
 _ROLE_KEYWORDS: list[tuple[str, list[str]]] = [
@@ -54,7 +93,12 @@ _BPM_LIKELY = re.compile(r"(?<!\d)(\d{2,3})(?!\d)")
 _KEY_STRICT = re.compile(
     r"(?:^|[_\-\s])([A-G])([#b♯♭])?(m|min|maj|Maj|MAJ)(?=[_\-\s.]|$)"
 )
-_KEY_LOOSE = re.compile(r"(?:^|[_\-\s])([A-G])([#b])(?=[_\-\s.]|$)")
+# Accidental optional (was required) - a boundary-separated bare letter
+# ("Sub_Bass_D_130.wav") is accepted as a bare major key too now, per an
+# explicit tradeoff decision: this also means a stray single-letter token
+# that means something else (a take/version/mic label, e.g. "Mix_Take_D_v2")
+# can false-match as a key. Confirmed acceptable for this codebase.
+_KEY_LOOSE = re.compile(r"(?:^|[_\-\s])([A-G])([#b]?)(?=[_\-\s.]|$)")
 
 
 def _parse_bpm(filename: str) -> int | None:
@@ -75,8 +119,8 @@ def _parse_bpm(filename: str) -> int | None:
 
 def _parse_key(filename: str) -> str | None:
     """Extract musical key from a filename. Accepts:
-      Am, Bbm, F#m, Cmaj, G#Maj, D#min, A_, C#_, etc.
-    Returns a normalised key like 'Am', 'F#m', 'Cmaj'."""
+      Am, Bbm, F#m, Cmaj, G#Maj, D#min, A_, C#_, D (bare major), etc.
+    Returns a normalised key like 'Am', 'F#m', 'Cmaj', 'D'."""
     stem = filename.rsplit(".", 1)[0]
 
     def _norm(letter: str, acc: str | None, quality: str | None) -> str:
@@ -94,7 +138,6 @@ def _parse_key(filename: str) -> str | None:
         return _norm(m.group(1), m.group(2), m.group(3))
     m = _KEY_LOOSE.search(stem)
     if m:
-        # Loose match requires an accidental (F# / Bb / etc.) for confidence.
         return _norm(m.group(1), m.group(2), None)
     return None
 
@@ -139,6 +182,83 @@ def _duration_seconds(path: Path) -> float | None:
     return None
 
 
+def _matches_query(path_str: str, query_terms: list[str]) -> bool:
+    """All terms must appear in the path (AND, case-insensitive) - lets a
+    genre/style word and a specific descriptor combine in one query
+    ("techno kick") instead of one flat keyword. Matches against the full
+    path (not just filename) so a term matching a containing folder name
+    (e.g. "footstep" matching .../Footsteps/concrete_01.wav) counts too.
+    """
+    if not query_terms:
+        return True
+    lowered = path_str.lower()
+    return all(term in lowered for term in query_terms)
+
+
+_KEY_TOKEN = re.compile(r"^([A-Ga-g])([#b]?)(m|min|maj)?$")
+
+
+def _matches_key(parsed_key: str | None, key_filter: str) -> bool:
+    """Match a key filter against a parsed key. Root letter + accidental
+    must match exactly (D != D# != Db); quality (major/minor) only has to
+    match if the filter specifies one — "D" matches "D", "Dm" and "Dmaj"
+    alike, since asking for "key of D" doesn't imply a mode.
+    """
+    if not key_filter:
+        return True
+    if not parsed_key:
+        return False
+    fm = _KEY_TOKEN.match(key_filter.strip())
+    pm = _KEY_TOKEN.match(parsed_key.strip())
+    if not fm or not pm:
+        return parsed_key.lower() == key_filter.lower()
+
+    def _quality(q: str | None) -> str:
+        q = (q or "").lower()
+        return "min" if q in ("m", "min") else ("maj" if q == "maj" else "")
+
+    f_letter, f_acc, f_qual = fm.groups()
+    p_letter, p_acc, p_qual = pm.groups()
+    if f_letter.upper() != p_letter.upper():
+        return False
+    if (f_acc or "").lower() != (p_acc or "").lower():
+        return False
+    if f_qual and _quality(f_qual) != _quality(p_qual):
+        return False
+    return True
+
+
+def _passes_filters(
+    parsed: dict,
+    query_terms: list[str],
+    path_str: str,
+    min_bpm: int,
+    max_bpm: int,
+    role: str,
+    key: str = "",
+) -> bool:
+    """Combine the query/bpm/role/key filters — all given filters must
+    pass. A BPM/role/key filter excludes files where that field didn't
+    parse, same as an unmatched query term would.
+    """
+    if not _matches_query(path_str, query_terms):
+        return False
+    if (min_bpm > 0 or max_bpm > 0):
+        bpm = parsed["bpm"]
+        if bpm is None:
+            return False
+        if min_bpm > 0 and bpm < min_bpm:
+            return False
+        if max_bpm > 0 and bpm > max_bpm:
+            return False
+    if role:
+        if not parsed["role"] or parsed["role"].lower() != role.lower():
+            return False
+    if not _matches_key(parsed["key"], key):
+        return False
+    return True
+
+
 def _safe_folder(path: str) -> Path:
     """Validate a folder path — same system-directory/traversal guard every
     other path-accepting tool uses, plus the exists()/is_dir() checks a
@@ -164,6 +284,11 @@ def register(mcp: FastMCP):
         path: str,
         recursive: bool = True,
         max_files: int = 500,
+        query: str = "",
+        min_bpm: int = 0,
+        max_bpm: int = 0,
+        role: str = "",
+        key: str = "",
     ) -> dict:
         """Walk a folder for audio loops and parse metadata from filenames.
 
@@ -172,10 +297,30 @@ def register(mcp: FastMCP):
         extracted from the filename. Plus a `summary` of distributions so
         the AI can quickly decide on a target BPM / key before picking loops.
 
+        For a large library (thousands of files), don't scan the whole
+        thing blindly: call `list_audio_subfolders` first to see its shape,
+        point `path` at the specific subfolder that matters, and use the
+        filters below to narrow further.
+
         Args:
             path: Absolute folder path (e.g., `D:/Music Production/Chillstep Express`).
             recursive: Walk subfolders too. Default True.
-            max_files: Stop after this many files. Default 500; max 5000.
+            max_files: With no filters, stop after this many files visited.
+                With any filter below active, stop after this many MATCHES
+                instead (the walk looks past non-matching files to find
+                them, up to an internal safety ceiling). Default 500; max 5000.
+            query: Space-separated terms, ALL must match (AND) against the
+                full path, case-insensitive — covers genre/style words
+                ("techno") and specific naming ("laugh") since these
+                usually appear literally in folder or file names.
+            min_bpm: Only files whose parsed BPM is >= this. 0 = no filter.
+            max_bpm: Only files whose parsed BPM is <= this. 0 = no filter.
+            role: Exact match (case-insensitive) against the parsed `role`
+                (kick/snare/hat/ride/perc/bass/pad/lead/vocal/fx/drums).
+                Empty = no filter.
+            key: Root note + optional accidental, e.g. "D", "F#", "Bb".
+                Matches any quality (major/minor) unless you specify one
+                ("Dm"). Empty = no filter.
 
         Returns a structure with:
           - folder: resolved absolute path
@@ -186,17 +331,26 @@ def register(mcp: FastMCP):
                              parsed: { bpm, key, role } }
           - hint: a one-line suggestion for the AI's next call
 
-        Files without parseable metadata are still listed; their fields
-        are null. Pair with `transport_set_bpm` + `load_loops` to turn the
-        selection into a working REAPER session.
+        Files without parseable metadata are still listed when no filter
+        needs that field; a min_bpm/max_bpm/role/key filter excludes files
+        where that specific field didn't parse. Pair with
+        `transport_set_bpm` + `load_loops` to turn the selection into a
+        working REAPER session.
         """
         if not 1 <= max_files <= 5000:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "max_files must be 1-5000")
+        if min_bpm < 0 or max_bpm < 0:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "min_bpm/max_bpm must be >= 0")
+        if min_bpm > 0 and max_bpm > 0 and min_bpm > max_bpm:
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "min_bpm must be <= max_bpm")
 
         folder = _safe_folder(path)
+        query_terms = query.lower().split()
+        has_filter = bool(query_terms) or min_bpm > 0 or max_bpm > 0 or bool(role) or bool(key)
 
         loops: list[dict] = []
         truncated = False
+        scanned = 0
 
         walker = folder.rglob("*") if recursive else folder.iterdir()
         try:
@@ -205,9 +359,27 @@ def register(mcp: FastMCP):
                     continue
                 if p.suffix.lower() not in AUDIO_EXTS:
                     continue
-                if len(loops) >= max_files:
+
+                if has_filter:
+                    if len(loops) >= max_files:
+                        truncated = True
+                        break
+                    scanned += 1
+                    if scanned > _MAX_SCAN_ENTRIES:
+                        truncated = True
+                        break
+                elif len(loops) >= max_files:
                     truncated = True
                     break
+
+                parsed = {
+                    "bpm": _parse_bpm(p.name),
+                    "key": _parse_key(p.name),
+                    "role": _parse_role(p.name),
+                }
+                if has_filter and not _passes_filters(parsed, query_terms, str(p), min_bpm, max_bpm, role, key):
+                    continue
+
                 try:
                     size_mb = round(p.stat().st_size / 1_048_576, 3)
                 except OSError:
@@ -217,11 +389,7 @@ def register(mcp: FastMCP):
                     "filename": p.name,
                     "duration_sec": _duration_seconds(p),
                     "size_mb": size_mb,
-                    "parsed": {
-                        "bpm": _parse_bpm(p.name),
-                        "key": _parse_key(p.name),
-                        "role": _parse_role(p.name),
-                    },
+                    "parsed": parsed,
                 })
         except PermissionError as e:
             raise ReaperMCPError(
@@ -244,7 +412,13 @@ def register(mcp: FastMCP):
             "files_without_parsed_key": no_key,
         }
 
-        if not loops:
+        if not loops and has_filter:
+            hint = (
+                f"No files under {folder} matched the given query/min_bpm/max_bpm/role/key. "
+                f"Try list_audio_subfolders to check you're pointed at the right subfolder, "
+                f"or loosen the filter."
+            )
+        elif not loops:
             hint = f"No audio files found under {folder}. Check the path or try recursive=True."
         elif bpms:
             top_bpm, top_count = Counter(bpms).most_common(1)[0]
@@ -267,6 +441,53 @@ def register(mcp: FastMCP):
             "truncated": truncated,
             "summary": summary,
             "loops": loops,
+            "hint": hint,
+        }
+
+    @mcp.tool()
+    async def list_audio_subfolders(path: str, max_depth: int = 2) -> dict:
+        """List the subfolder structure under a folder — fast, no per-file
+        metadata work (no duration/BPM/key parsing, no size stat), just
+        directory names and a cheap audio-file count per folder. Use this
+        BEFORE scan_audio_folder on a large library (thousands of files):
+        see the shape of it first (genre/category folders are almost
+        always real subfolders — "Footsteps/", "Ambience/Wind/",
+        "Weapons/Gunshots/"), then point scan_audio_folder's `path` at the
+        specific subfolder that matters instead of scanning everything.
+
+        Args:
+            path: Absolute folder path to list under.
+            max_depth: How many levels deep to descend. 1 = immediate
+                children of `path` only. Default 2.
+        """
+        if max_depth < 1:
+            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "max_depth must be >= 1")
+
+        folder = _safe_folder(path)
+        try:
+            folders, truncated = _walk_subfolders(folder, max_depth)
+        except PermissionError as e:
+            raise ReaperMCPError(
+                ErrorCode.COMMAND_FAILED,
+                f"Permission denied while listing: {e}",
+            )
+
+        if not folders:
+            hint = f"No subfolders under {folder} — it's flat. Just call scan_audio_folder on it directly."
+        else:
+            biggest = max(folders, key=lambda f: f["audio_file_count"])
+            hint = (
+                f"Found {len(folders)} subfolder(s). Largest: '{biggest['relative_path']}' "
+                f"({biggest['audio_file_count']} audio files). Point scan_audio_folder's "
+                f"path at whichever subfolder matches what you're looking for."
+            )
+
+        return {
+            "folder": str(folder),
+            "max_depth": max_depth,
+            "subfolder_count": len(folders),
+            "truncated": truncated,
+            "subfolders": folders,
             "hint": hint,
         }
 

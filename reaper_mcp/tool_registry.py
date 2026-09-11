@@ -98,7 +98,7 @@ BUILTIN_PROFILES: dict[str, ToolProfile] = {
         include_modules={
             "transport_tools", "track_tools", "fx_tools", "inventory_tools",
             "mix_tools", "sidechain_tools", "pipeline_tools", "send_tools",
-            "envelope_tools", "analysis_tools", "compose_edit_tools",
+            "envelope_tools", "analysis_tools", "compose_edit_tools", "loops_tools",
         },
         instruction_packs=["core", "mixing", "automation", "styles"],
     ),
@@ -106,14 +106,14 @@ BUILTIN_PROFILES: dict[str, ToolProfile] = {
         name="analysis",
         include_modules={
             "transport_tools", "track_tools", "project_tools",
-            "analysis_tools", "compose_tools",
+            "analysis_tools", "compose_tools", "loops_tools",
         },
         instruction_packs=["core", "postproduction"],
     ),
     "minimal": ToolProfile(
         name="minimal",
         include_modules={
-            "transport_tools", "track_tools", "project_tools",
+            "transport_tools", "track_tools", "project_tools", "loops_tools",
         },
         instruction_packs=["core"],
     ),
@@ -124,6 +124,7 @@ BUILTIN_PROFILES: dict[str, ToolProfile] = {
             "take_tools", "midi_tools", "quantize_tools", "selection_tools",
             "fx_tools", "inventory_tools", "mix_tools", "sidechain_tools",
             "envelope_tools", "send_tools", "pipeline_tools", "compose_edit_tools",
+            "loops_tools",
         },
         instruction_packs=["core", "composition", "automation", "mixing", "styles"],
     ),

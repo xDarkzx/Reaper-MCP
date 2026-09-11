@@ -2571,20 +2571,49 @@ function marker.marker_get_all(p)
   return {count = count, markers = markers}
 end
 
+-- AddProjectMarker2 returns the marker/region's NUMBER (a persistent
+-- display id REAPER reuses once freed), not its ENUMERATION INDEX (the
+-- position marker_get_all/marker_delete/marker_edit actually key off).
+-- Confirmed live: after any earlier marker is deleted, the two diverge -
+-- e.g. adding a 4th marker after deleting the 1st returned number=1
+-- (reused) while its real index was 2, so passing that number straight
+-- into marker_delete/marker_edit as marker_index would silently hit
+-- whatever marker actually sits at that index instead. Resolve the real
+-- index the same way item_duplicate's fix resolves item indices: scan
+-- after the fact and match, rather than assume where it landed.
+local function find_marker_index(number, is_region)
+  local count = reaper.CountProjectMarkers(0)
+  for i = 0, count - 1 do
+    local _, isrgn, _, _, _, num = reaper.EnumProjectMarkers3(0, i)
+    if num == number and isrgn == is_region then return i end
+  end
+  return -1
+end
+
 function marker.marker_add(p)
   if p.position == nil then return nil, "Missing parameter: position" end
   local r, g, b = clamp_color(p.color_r), clamp_color(p.color_g), clamp_color(p.color_b)
   local color = native_color_or_none(r, g, b)
-  local idx = reaper.AddProjectMarker2(0, false, p.position, 0, p.name or "", -1, color)
-  return {marker_number = idx, position = p.position, name = p.name or "", color = {r = r, g = g, b = b}, total_markers = reaper.CountProjectMarkers(0)}
+  local num = reaper.AddProjectMarker2(0, false, p.position, 0, p.name or "", -1, color)
+  local index = find_marker_index(num, false)
+  return {
+    marker_number = num, marker_index = index, position = p.position,
+    name = p.name or "", color = {r = r, g = g, b = b},
+    total_markers = reaper.CountProjectMarkers(0),
+  }
 end
 
 function marker.marker_add_region(p)
   if not p.start or not p["end"] then return nil, "Missing parameter: start/end" end
   local r, g, b = clamp_color(p.color_r), clamp_color(p.color_g), clamp_color(p.color_b)
   local color = native_color_or_none(r, g, b)
-  local idx = reaper.AddProjectMarker2(0, true, p.start, p["end"], p.name or "", -1, color)
-  return {region_number = idx, start = p.start, ["end"] = p["end"], name = p.name or "", color = {r = r, g = g, b = b}, total_markers = reaper.CountProjectMarkers(0)}
+  local num = reaper.AddProjectMarker2(0, true, p.start, p["end"], p.name or "", -1, color)
+  local index = find_marker_index(num, true)
+  return {
+    region_number = num, marker_index = index, start = p.start, ["end"] = p["end"],
+    name = p.name or "", color = {r = r, g = g, b = b},
+    total_markers = reaper.CountProjectMarkers(0),
+  }
 end
 
 function marker.marker_delete(p)
@@ -3944,13 +3973,23 @@ function compose.add_markers_batch(p)
     if is_region then
       local s = entry.start or entry.position or 0
       local e = entry["end"] or (s + 1)
-      local idx = reaper.AddProjectMarker2(0, true, s, e, name, -1, color)
-      results[#results+1] = {type = "region", index = idx, name = name, start = s, ["end"] = e}
+      local num = reaper.AddProjectMarker2(0, true, s, e, name, -1, color)
+      results[#results+1] = {type = "region", number = num, is_region = true, name = name, start = s, ["end"] = e}
     else
       local pos = entry.position or 0
-      local idx = reaper.AddProjectMarker2(0, false, pos, 0, name, -1, color)
-      results[#results+1] = {type = "marker", index = idx, name = name, position = pos}
+      local num = reaper.AddProjectMarker2(0, false, pos, 0, name, -1, color)
+      results[#results+1] = {type = "marker", number = num, is_region = false, name = name, position = pos}
     end
+  end
+
+  -- Resolve every entry's real index in one pass after ALL inserts are
+  -- done, not per-entry as each is created: a later entry positioned
+  -- earlier in time than one already added would shift that earlier
+  -- entry's enumeration index out from under a per-entry resolution
+  -- (same reasoning as item_duplicate's post-insert index resolution).
+  for _, r in ipairs(results) do
+    r.index = find_marker_index(r.number, r.is_region)
+    r.is_region = nil
   end
 
   reaper.UpdateArrange()

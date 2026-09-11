@@ -211,6 +211,12 @@ def register(mcp: FastMCP):
     async def add_markers_batch(markers: str) -> dict:
         """Batch add markers/regions.
 
+        Each result entry includes both `index` and `number` - use `index`
+        for any follow-up marker_delete/marker_edit/markers_apply call.
+        `number` is REAPER's own display id, which it reuses once freed by
+        a delete; it does not track the marker's position in the project
+        and will not match `index` in a project that's had markers deleted.
+
         Args:
             markers: JSON array. Markers: {"position":0,"name":"Intro"}. Regions:
                      {"start":0,"end":8,"name":"V1","is_region":true}.

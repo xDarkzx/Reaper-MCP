@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **179 tools across 27 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **180 tools across 27 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,12 +12,14 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Exact Tools | Instruction Chars | Use when |
 |---------|--------:|------------:|------------------:|----------|
-| `full` | 27 | 179 | ~13.2k | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 17 | 136 | ~7.6k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
-| `production` | 16 | 136 | ~10.1k | MIDI instruments, stem bouncing, FX chains (`setup_fx_chain`/`setup_effect_bus`), and mixing. Drops arrangement helpers (patterns/loops/chops). |
-| `mixing` | 11 | 80 | ~7.8k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
-| `analysis` | 5 | 57 | ~3.9k | Inspect and measure only. Read-mostly workflow. |
-| `minimal` | 3 | 47 | ~1.7k | Smoke test / basic control surface. |
+| `full` | 27 | 180 | ~13.2k | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 17 | 137 | ~7.6k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
+| `production` | 17 | 140 | ~10.1k | MIDI instruments, stem bouncing, FX chains (`setup_fx_chain`/`setup_effect_bus`), and mixing. Drops arrangement helpers (patterns/chops). |
+| `mixing` | 12 | 84 | ~7.8k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
+| `analysis` | 6 | 61 | ~3.9k | Inspect and measure only. Read-mostly workflow. |
+| `minimal` | 4 | 51 | ~1.7k | Smoke test / basic control surface. |
+
+Audio-library search (`scan_audio_folder`, `list_audio_subfolders`, `detect_common_bpm`, `load_loops` — the `loops_tools` module) is available in every profile, since finding and importing audio files isn't specific to any one workflow.
 
 ### Exact Tool Filtering & Custom Profiles
 

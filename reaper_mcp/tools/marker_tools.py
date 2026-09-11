@@ -61,6 +61,12 @@ def register(mcp: FastMCP):
     async def marker_add(position: float, name: str = "", color_r: int = 0, color_g: int = 0, color_b: int = 0) -> dict:
         """Add marker. Prefer add_markers_batch for multiple.
 
+        Returns both `marker_index` and `marker_number` - use `marker_index`
+        for any follow-up marker_delete/marker_edit/markers_apply call.
+        `marker_number` is REAPER's own display id, which it reuses once
+        freed by a delete, so it will not match `marker_index` in a project
+        that's had markers deleted.
+
         Args:
             position: Seconds.
             name: Label.
@@ -80,6 +86,12 @@ def register(mcp: FastMCP):
     async def marker_add_region(start: float, end: float, name: str = "",
                                 color_r: int = 0, color_g: int = 0, color_b: int = 0) -> dict:
         """Add region. Prefer add_markers_batch for multiple.
+
+        Returns both `marker_index` and `region_number` - use `marker_index`
+        for any follow-up marker_delete/marker_edit/markers_apply call.
+        `region_number` is REAPER's own display id, which it reuses once
+        freed by a delete, so it will not match `marker_index` in a project
+        that's had regions deleted.
 
         Args:
             start: Start seconds.

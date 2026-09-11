@@ -2,6 +2,54 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [0.7.0] - 2026-09-11
+
+### Added
+
+- **`list_audio_subfolders`**: fast folder-tree discovery for a large audio
+  library — directory names and a cheap per-folder audio-file count, no
+  per-file metadata work. Use before `scan_audio_folder` on a library of
+  thousands of files to see its shape (genre/category folders are almost
+  always real subfolders) instead of scanning everything blindly.
+- **`scan_audio_folder` gains `query`/`min_bpm`/`max_bpm`/`role`/`key`
+  filters**, all combinable. `query` is multi-term AND matching against
+  the full path (covers genre/style words and specific naming alike, e.g.
+  "techno kick" or "laugh"). With any filter active, `max_files` caps
+  matches found, not files visited, so the walk searches past
+  non-matching files instead of stopping after the first batch of them —
+  verified live against a real 300+ file, 31-subfolder library
+  (`query="attack"` found 52 matches across the whole tree in one call).
+- **`loops_tools` (audio search: `scan_audio_folder`,
+  `list_audio_subfolders`, `detect_common_bpm`, `load_loops`) is now
+  available in every tool profile** (`mixing`, `analysis`, `minimal`,
+  `production` were missing it) — finding and importing audio isn't
+  specific to any one workflow.
+
+### Fixed
+
+- **`marker_add`/`marker_add_region`/`add_markers_batch` returned a
+  marker/region's reusable display NUMBER mislabeled as (or, in
+  `add_markers_batch`, literally named) an INDEX.** REAPER reuses a
+  freed number once its marker is deleted, so the two diverge as soon as
+  any earlier marker is deleted — verified live: deleting the 1st of 3
+  markers then adding a 4th returned number=1 (reused) while its real
+  enumeration index was 2. Passing that value into a follow-up
+  marker_delete/marker_edit/markers_apply call would silently target
+  whatever marker actually sits at that index instead. All three now
+  resolve the real index by scanning after the insert (matching
+  `item_duplicate`'s fix for the same class of bug); `add_markers_batch`
+  resolves every entry's index in one pass after all inserts are done,
+  not per-entry, since a later entry positioned earlier in time than one
+  already added would shift that earlier entry's index out from under a
+  per-entry resolution — verified with exactly that scenario.
+- **`_parse_key` (loop filename key detection) didn't recognize a bare
+  major-key letter** (e.g. "D" with no accidental or major/minor suffix)
+  at all — only keys with an accidental (`F#`) or quality (`Dm`, `Cmaj`)
+  were matched. Real files like `Sub_Bass_D_130.wav` parsed as
+  `key: null`. Now matches bare letters too (accepted tradeoff: a stray
+  single-letter token that means something else, e.g. a take/version/mic
+  label, can occasionally false-match as a key).
+
 ## [0.6.9] - 2026-09-11
 
 ### Removed
