@@ -829,10 +829,19 @@ end
 -- Helper: get track safely
 -- ============================================================
 
+-- Index -1 is the master track. Only the tools whose Python side admits -1
+-- (the fx_* tools) can reach it.
+local MASTER_TRACK_INDEX = -1
+
 local function get_track(params, key)
   local idx = params[key or "track_index"]
   if idx == nil then return nil, nil, "Missing parameter: " .. (key or "track_index") end
-  local tr = reaper.GetTrack(0, math.floor(idx))
+  local tr
+  if math.floor(idx) == MASTER_TRACK_INDEX then
+    tr = reaper.GetMasterTrack(0)
+  else
+    tr = reaper.GetTrack(0, math.floor(idx))
+  end
   if not tr then return nil, nil, "Track not found (index " .. idx .. ")" end
   return tr, math.floor(idx), nil
 end

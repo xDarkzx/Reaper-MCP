@@ -4,6 +4,18 @@ from reaper_mcp_shared.constants import MAX_SCAN_PARAMS
 from reaper_mcp_shared.plugin_cache import infer_curve, load_cached_map, save_cached_map
 
 
+MASTER_TRACK_INDEX = -1
+
+
+def _check_track_index(track_index: int) -> None:
+    """FX tools address the master track as index -1."""
+    if track_index < MASTER_TRACK_INDEX:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            "track_index must be >= 0, or -1 for the master track",
+        )
+
+
 def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
@@ -12,11 +24,10 @@ def register(mcp: FastMCP):
         """Remove FX from track chain.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_remove", track_index=track_index, fx_index=fx_index)
@@ -26,10 +37,9 @@ def register(mcp: FastMCP):
         """Get FX chain for a track (names, enabled, presets, param counts).
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         return await client.execute("fx_get_chain", track_index=track_index)
 
     @mcp.tool()
@@ -40,7 +50,7 @@ def register(mcp: FastMCP):
         to keep context size small.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
             max_results: Cap on returned (post-filter) params (default 300,
                 hard ceiling 2000) — junk filtering handles the common case
@@ -48,8 +58,7 @@ def register(mcp: FastMCP):
                 for any plugin with a genuinely large number of real params.
                 `truncated` in the response says whether more exist.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if max_results <= 0:
@@ -88,11 +97,10 @@ def register(mcp: FastMCP):
         separate from fx_get_params rather than folded into routine reads.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
 
@@ -136,11 +144,10 @@ def register(mcp: FastMCP):
         """Enable an FX plugin.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_enable", track_index=track_index, fx_index=fx_index)
@@ -150,11 +157,10 @@ def register(mcp: FastMCP):
         """Bypass an FX plugin.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_disable", track_index=track_index, fx_index=fx_index)
@@ -164,11 +170,10 @@ def register(mcp: FastMCP):
         """Open FX plugin UI window.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_show_ui", track_index=track_index, fx_index=fx_index)
@@ -178,11 +183,10 @@ def register(mcp: FastMCP):
         """Get current preset name and count.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute("fx_get_preset", track_index=track_index, fx_index=fx_index)
@@ -206,7 +210,7 @@ def register(mcp: FastMCP):
         reporting success.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
             preset_name: Preset name, exactly as the plugin reports it.
             include_params: Also return the plugin's full parameter list.
@@ -214,8 +218,7 @@ def register(mcp: FastMCP):
                 thousands of characters. Use fx_get_params when the
                 parameters are what you actually want.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if not preset_name:
@@ -233,12 +236,11 @@ def register(mcp: FastMCP):
         """Step to next/previous preset.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
             direction: 1=next, -1=previous.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if direction not in (-1, 1):
@@ -250,10 +252,9 @@ def register(mcp: FastMCP):
         """Find VSTi instrument on track. Returns index + params, or -1 if none.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         return await client.execute("fx_get_instrument", track_index=track_index)
 
     @mcp.tool()
@@ -261,12 +262,11 @@ def register(mcp: FastMCP):
         """Move FX to different position in chain.
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: Current FX index.
             new_index: Target position.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if new_index < 0:
@@ -282,15 +282,14 @@ def register(mcp: FastMCP):
         internally to prefix all its additions with "[MIX] ".
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: FX slot within the chain.
             new_name: New display name. Max 1000 characters.
 
         Requires REAPER 6.37+ (for TrackFX_SetNamedConfigParm with
         "renamed_name"). Older REAPER versions will error out cleanly.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         if not new_name:
@@ -319,11 +318,10 @@ def register(mcp: FastMCP):
         Requires REAPER >= 6.0 (TrackFX_GetPinMappings).
 
         Args:
-            track_index: 0-based track index.
+            track_index: 0-based track index, or -1 for the master track.
             fx_index: 0-based FX chain index.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if fx_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "fx_index must be >= 0")
         return await client.execute(
