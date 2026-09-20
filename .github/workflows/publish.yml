@@ -20,6 +20,19 @@ name: Publish to PyPI
   workflow_dispatch:
 
 jobs:
+  lint:
+    # Same gate as CI's lint job: the tagged commit itself must pass static
+    # analysis too, not just its tests. Runs once, not across the matrix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Run ruff
+        run: ruff check .
+
   test:
     # Gate: publishing requires the tagged commit itself to pass tests, not
     # just whatever main's CI run said earlier — a tag can point anywhere.
@@ -38,7 +51,7 @@ jobs:
       - run: pytest tests/ -x -q
 
   build:
-    needs: test
+    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
