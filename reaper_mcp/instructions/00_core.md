@@ -26,6 +26,7 @@ the first place.
 **ALWAYS use `wipe_all_midi()` to clear MIDI.** This is the ONLY correct way to wipe a project.
 - It deletes MIDI items (audio items are left untouched), clears markers/regions, and resets composition state in one call.
 - NEVER manually delete items with `item_delete`, `midi_delete_all_notes`, or loops of individual track operations.
+- To delete tracks, make ONE `track_delete_batch` call — `[{"all": true}]` for every track, `[{"track_index": 3}]` for one, `[{"track_indices": [0, 2, 5]}]` for several — never a loop of single deletes. It can't delete the master track. Confirm first on a project that already has content.
 - NEVER use `edit_section` with empty tracks to "clear" — use `wipe_all_midi`.
 - For partial wipe: `wipe_all_midi(tracks="[0,1,2]")` — pass specific track indices.
 
@@ -147,6 +148,21 @@ Auto-detects FabFilter (Pro-Q 3 / Pro-C 2 / Pro-R) or falls back to REAPER stock
 ## `engine_master(style, clean=True)` — mastering chain on master bus
 HP 25Hz → bus glue comp → tonal shelf EQ → stereo width → brick-wall limiter.
 Targets per-style LUFS and true-peak ceiling.
+
+## Master track and removing FX — `track_index=-1` / `fx_remove_batch`
+The master track is `track_index=-1` in every `fx_*` tool, `setup_fx_chain`
+and `configure_tracks` — so you can inspect the master chain with
+`fx_get_chain(-1)`, or build a mastering chain with parameters in one
+`setup_fx_chain` call instead of `engine_master`, which replaces the chain.
+To remove plugins, use `fx_remove_batch` — one call for one FX, several, or
+a whole chain, across as many tracks as you like. Entries are a JSON array:
+`{"track_index": -1, "all": true}` clears a chain, `{"track_index": 2,
+"fx_index": 3}` removes one, `{"track_index": 2, "fx_indices": [0, 3, 4]}`
+removes several. Indices refer to the chain as it is when the call starts,
+so entries can overlap or come in any order. Don't loop single removals. A
+bad track or index lands in the response's `errors` array without aborting
+the rest. It deletes plugins the user may have added themselves, so on an
+existing project confirm before clearing a chain.
 
 ## `setup_sidechain(source_track, target_track, amount, ...)` — kick→bass/pad pumping
 Creates aux send on channels 3/4, pin-maps compressor sidechain inputs, tunes the pump.

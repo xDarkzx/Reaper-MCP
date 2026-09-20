@@ -26,5 +26,6 @@ the first place.
 **ALWAYS use `wipe_all_midi()` to clear MIDI.** This is the ONLY correct way to wipe a project.
 - It deletes MIDI items (audio items are left untouched), clears markers/regions, and resets composition state in one call.
 - NEVER manually delete items with `item_delete`, `midi_delete_all_notes`, or loops of individual track operations.
+- To delete tracks, make ONE `track_delete_batch` call — `[{"all": true}]` for every track, `[{"track_index": 3}]` for one, `[{"track_indices": [0, 2, 5]}]` for several — never a loop of single deletes. It can't delete the master track. Confirm first on a project that already has content.
 - NEVER use `edit_section` with empty tracks to "clear" — use `wipe_all_midi`.
 - For partial wipe: `wipe_all_midi(tracks="[0,1,2]")` — pass specific track indices.

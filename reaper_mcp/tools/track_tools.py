@@ -1,6 +1,72 @@
+import json
+
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp.safety import ensure_backup
+
+_MAX_TRACK_DELETE_ENTRIES = 200
+_TRACK_DELETE_SELECTORS = ("all", "track_index", "track_indices")
+
+
+def _is_index(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_deletable_index(value, context: str) -> None:
+    """A numbered track: an int >= 0. The master track can never be deleted."""
+    if not _is_index(value):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: track index must be an int")
+    if value == -1:
+        raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, f"{context}: the master track cannot be deleted")
+    if value < 0:
+        raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, f"{context}: track index must be >= 0")
+
+
+def _normalize_track_delete_entries(entries) -> list[dict]:
+    """Validate track_delete_batch entries and return them in the shape the Lua
+    handler expects: either all=True or a track_indices list, highest first.
+
+    Each entry must carry exactly one selector (all / track_index / track_indices).
+    """
+    if not isinstance(entries, list) or len(entries) == 0:
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "entries must be a non-empty JSON array")
+    if len(entries) > _MAX_TRACK_DELETE_ENTRIES:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            f"Too many entries: {len(entries)} (max {_MAX_TRACK_DELETE_ENTRIES})",
+        )
+
+    normalized = []
+    for i, entry in enumerate(entries):
+        context = f"Entry {i}"
+        if not isinstance(entry, dict):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context} must be an object")
+        selectors = [key for key in _TRACK_DELETE_SELECTORS if key in entry]
+        if len(selectors) != 1:
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                f"{context} needs exactly one of: {', '.join(_TRACK_DELETE_SELECTORS)}",
+            )
+
+        selector = selectors[0]
+        if selector == "all":
+            if entry["all"] is not True:
+                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: all must be true")
+            normalized.append({"all": True})
+        elif selector == "track_index":
+            _check_deletable_index(entry["track_index"], context)
+            normalized.append({"track_indices": [entry["track_index"]]})
+        else:
+            indices = entry["track_indices"]
+            if not isinstance(indices, list) or not indices:
+                raise ReaperMCPError(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"{context}: track_indices must be a non-empty array",
+                )
+            for value in indices:
+                _check_deletable_index(value, context)
+            normalized.append({"track_indices": sorted(set(indices), reverse=True)})
+    return normalized
 
 
 def register(mcp: FastMCP):
@@ -46,16 +112,31 @@ def register(mcp: FastMCP):
         return await client.execute("track_create", **params)
 
     @mcp.tool()
-    async def track_delete(track_index: int) -> dict:
-        """Delete a track.
+    async def track_delete_batch(entries: str) -> dict:
+        """Delete one track, several, or all of them, in one call.
+
+        Destructive: on a project that already has content, confirm with the
+        user before calling. A project backup is taken first.
 
         Args:
-            track_index: 0-based track index.
+            entries: JSON array. Each entry has exactly one of:
+                       {"all": true}                          delete every track
+                       {"track_index": 3}                     delete one track
+                       {"track_indices": [0, 2, 5]}           delete several
+                     Indices are 0-based and refer to the track numbering as it
+                     is when the call starts; deletion order is handled for you,
+                     so entries can overlap or come in any order. The master
+                     track can't be deleted. A bad index is recorded in the
+                     response's errors array and does not abort the rest. The
+                     response lists what was deleted (original index and name).
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        try:
+            parsed = json.loads(entries)
+        except (json.JSONDecodeError, TypeError):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "Invalid entries JSON")
+        normalized = _normalize_track_delete_entries(parsed)
         backup = await ensure_backup(client)
-        result = await client.execute("track_delete", track_index=track_index)
+        result = await client.execute("track_delete_batch", entries=json.dumps(normalized))
         if isinstance(result, dict) and backup:
             result["backup"] = backup
         return result

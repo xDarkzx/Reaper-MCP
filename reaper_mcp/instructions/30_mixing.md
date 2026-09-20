@@ -31,6 +31,21 @@ Auto-detects FabFilter (Pro-Q 3 / Pro-C 2 / Pro-R) or falls back to REAPER stock
 HP 25Hz → bus glue comp → tonal shelf EQ → stereo width → brick-wall limiter.
 Targets per-style LUFS and true-peak ceiling.
 
+## Master track and removing FX — `track_index=-1` / `fx_remove_batch`
+The master track is `track_index=-1` in every `fx_*` tool, `setup_fx_chain`
+and `configure_tracks` — so you can inspect the master chain with
+`fx_get_chain(-1)`, or build a mastering chain with parameters in one
+`setup_fx_chain` call instead of `engine_master`, which replaces the chain.
+To remove plugins, use `fx_remove_batch` — one call for one FX, several, or
+a whole chain, across as many tracks as you like. Entries are a JSON array:
+`{"track_index": -1, "all": true}` clears a chain, `{"track_index": 2,
+"fx_index": 3}` removes one, `{"track_index": 2, "fx_indices": [0, 3, 4]}`
+removes several. Indices refer to the chain as it is when the call starts,
+so entries can overlap or come in any order. Don't loop single removals. A
+bad track or index lands in the response's `errors` array without aborting
+the rest. It deletes plugins the user may have added themselves, so on an
+existing project confirm before clearing a chain.
+
 ## `setup_sidechain(source_track, target_track, amount, ...)` — kick→bass/pad pumping
 Creates aux send on channels 3/4, pin-maps compressor sidechain inputs, tunes the pump.
 Amount 0-1: 0.4 subtle, 0.7 typical, 0.9 heavy.

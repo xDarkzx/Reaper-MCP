@@ -829,8 +829,11 @@ end
 -- Helper: get track safely
 -- ============================================================
 
--- Index -1 is the master track. Only the tools whose Python side admits -1
--- (the fx_* tools) can reach it.
+-- Index -1 is the master track. get_track resolves it, so any handler using
+-- get_track can act on the master if its Python side admits -1. Handlers
+-- where the master is meaningless or dangerous (delete, freeze, re-route,
+-- re-arm, overwrite state) use get_numbered_track below instead, so they
+-- keep refusing it here even if a Python guard is later loosened.
 local MASTER_TRACK_INDEX = -1
 
 local function get_track(params, key)
@@ -844,6 +847,46 @@ local function get_track(params, key)
   end
   if not tr then return nil, nil, "Track not found (index " .. idx .. ")" end
   return tr, math.floor(idx), nil
+end
+
+-- Same as get_track, but refuses the master track. For handlers that only
+-- make sense on a numbered track.
+local function get_numbered_track(params, key)
+  local idx = params[key or "track_index"]
+  if idx ~= nil and math.floor(idx) == MASTER_TRACK_INDEX then
+    return nil, nil, "The master track is not supported by this tool"
+  end
+  return get_track(params, key)
+end
+
+-- The batch tools (setup_fx_chain, configure_tracks) receive a raw numeric
+-- index per entry rather than a params table, so they cannot use get_track
+-- above. Same -1 -> master rule, deliberately applied only at those two
+-- entry points: batching a mastering chain onto the master bus in the same
+-- call as track FX is the whole point, but nothing else gains -1 access.
+local function batch_track_from_index(ti)
+  if ti == MASTER_TRACK_INDEX then return reaper.GetMasterTrack(0) end
+  return reaper.GetTrack(0, ti)
+end
+
+-- Resolve the index of an FX already on the chain, or say why it can't be.
+-- REAPER's TrackFX_* functions quietly do nothing for an index that doesn't
+-- exist, so a handler that skips this check reports success for an FX it
+-- never touched. Returns fx_index, or nil + an error message.
+local function get_fx_index(tr, params, key)
+  key = key or "fx_index"
+  local v = params[key]
+  if v == nil then return nil, "Missing required parameter: " .. key end
+  local n = tonumber(v)
+  if not n then
+    return nil, "Parameter '" .. key .. "' must be a number, got: " .. tostring(v)
+  end
+  local fi = math.floor(n)
+  local count = reaper.TrackFX_GetCount(tr)
+  if fi < 0 or fi >= count then
+    return nil, key .. " " .. fi .. " out of range (chain has " .. count .. ")"
+  end
+  return fi
 end
 
 -- ============================================================
@@ -957,13 +1000,79 @@ function track.track_create(p)
   return build_track_info(tr, idx)
 end
 
-function track.track_delete(p)
-  local tr, idx, err = get_track(p)
-  if not tr then return nil, err end
-  local _, name = reaper.GetTrackName(tr)
-  reaper.DeleteTrack(tr)
+-- Batch track deletion. Each entry: {all=true | track_index | track_indices}.
+-- Targets are resolved to tracks as they are when the call starts and only
+-- then deleted, highest index first, so an earlier delete can never shift a
+-- later one and entry order doesn't matter. Numbered tracks only: the master
+-- is refused per entry by get_numbered_track. Mirrors items_apply: a bad
+-- entry lands in errors[] and does not abort the rest.
+function track.track_delete_batch(p)
+  if not p.entries then return nil, "Missing parameter: entries" end
+  local entries = p.entries
+  if type(entries) == "string" then entries = json_decode(entries) end
+  if type(entries) ~= "table" then return nil, "Invalid entries JSON" end
+
+  local count = reaper.CountTracks(0)
+  local targets = {}  -- track_index -> MediaTrack
+  local errors = {}
+
+  local function add_error(n, ti, msg)
+    errors[#errors+1] = {index = n - 1, track_index = ti, error = msg}
+  end
+
+  local function resolve(n, ti)
+    local tr, _, err = get_numbered_track({track_index = ti})
+    if not tr then
+      add_error(n, ti, err)
+    else
+      targets[ti] = tr
+    end
+  end
+
+  for n, e in ipairs(entries) do
+    if type(e) ~= "table" then
+      add_error(n, nil, "Entry must be an object")
+    elseif e.all == true then
+      for i = 0, count - 1 do resolve(n, i) end
+    else
+      local list = e.track_indices
+      if list == nil and e.track_index ~= nil then list = {e.track_index} end
+      if type(list) ~= "table" then
+        add_error(n, nil, "Entry needs one of: all, track_index, track_indices")
+      else
+        for _, v in ipairs(list) do
+          if type(v) ~= "number" then
+            add_error(n, nil, "track index must be a number")
+          else
+            resolve(n, math.floor(v))
+          end
+        end
+      end
+    end
+  end
+
+  local order = {}
+  for ti in pairs(targets) do order[#order+1] = ti end
+  table.sort(order, function(a, b) return a > b end)
+
+  reaper.Undo_BeginBlock()
+  local deleted_tracks = {}
+  for _, ti in ipairs(order) do
+    local tr = targets[ti]
+    local _, name = reaper.GetTrackName(tr)
+    reaper.DeleteTrack(tr)
+    table.insert(deleted_tracks, 1, {track_index = ti, name = name or ""})
+  end
   reaper.UpdateArrange()
-  return {deleted_index = idx, deleted_name = name or "", remaining_tracks = reaper.CountTracks(0)}
+  reaper.Undo_EndBlock("MCP: track_delete_batch", -1)
+
+  return {
+    success = true,
+    deleted = #deleted_tracks,
+    deleted_tracks = deleted_tracks,
+    remaining_tracks = reaper.CountTracks(0),
+    errors = errors,
+  }
 end
 
 function track.track_rename(p)
@@ -1007,7 +1116,7 @@ function track.track_set_solo(p)
 end
 
 function track.track_set_record_arm(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   reaper.SetMediaTrackInfo_Value(tr, "I_RECARM", p.arm and 1 or 0)
   return build_track_info(tr, idx)
@@ -1035,7 +1144,7 @@ function track.track_select(p)
 end
 
 function track.track_set_input(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   if p.input_index == nil then return nil, "Missing parameter: input_index" end
   reaper.SetMediaTrackInfo_Value(tr, "I_RECINPUT", math.floor(p.input_index))
@@ -1062,7 +1171,7 @@ function track.track_get_mixer_state(p)
 end
 
 function track.track_set_folder(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   if p.folder_depth == nil then return nil, "Missing parameter: folder_depth" end
   reaper.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", math.floor(p.folder_depth))
@@ -1451,12 +1560,77 @@ function fx.fx_add(p)
   return build_fx_chain(tr)
 end
 
-function fx.fx_remove(p)
-  local tr, idx, err = get_track(p)
-  if not tr then return nil, err end
-  if not p.fx_index then return nil, "Missing parameter: fx_index" end
-  reaper.TrackFX_Delete(tr, math.floor(p.fx_index))
-  return build_fx_chain(tr)
+-- Batch FX removal. Each entry: {track_index, all=true | fx_index | fx_indices}.
+-- Targets are resolved against each chain as it is when the call starts and
+-- only then deleted (highest index first), so entry order and overlapping
+-- entries can never shift an index mid-batch. Mirrors items_apply: a bad
+-- entry lands in errors[] and does not abort the rest.
+function fx.fx_remove_batch(p)
+  if not p.entries then return nil, "Missing parameter: entries" end
+  local entries = json_decode(p.entries)
+  if type(entries) ~= "table" then return nil, "Invalid entries JSON" end
+
+  local per_track = {}  -- track_index -> {tr, count, targets = {fx_index = true}}
+  local errors = {}
+
+  local function add_error(n, ti, fi, msg)
+    errors[#errors+1] = {index = n and (n - 1) or nil, track_index = ti, fx_index = fi, error = msg}
+  end
+
+  for n, e in ipairs(entries) do
+    local tr, ti, err = get_track(e)
+    if not tr then
+      add_error(n, e.track_index, nil, err)
+    else
+      local slot = per_track[ti]
+      if not slot then
+        slot = {tr = tr, count = reaper.TrackFX_GetCount(tr), targets = {}}
+        per_track[ti] = slot
+      end
+      if e.all == true then
+        for i = 0, slot.count - 1 do slot.targets[i] = true end
+      else
+        local list = e.fx_indices
+        if list == nil and e.fx_index ~= nil then list = {e.fx_index} end
+        if type(list) ~= "table" then
+          add_error(n, ti, nil, "Entry needs one of: all, fx_index, fx_indices")
+        else
+          for _, v in ipairs(list) do
+            if type(v) ~= "number" then
+              add_error(n, ti, nil, "fx index must be a number")
+            else
+              local fi = math.floor(v)
+              if fi >= 0 and fi < slot.count then
+                slot.targets[fi] = true
+              else
+                add_error(n, ti, fi, "fx_index out of range (chain has " .. slot.count .. ")")
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  reaper.Undo_BeginBlock()
+  local removed = 0
+  local tracks_out = {}
+  for ti, slot in pairs(per_track) do
+    local order = {}
+    for fi in pairs(slot.targets) do order[#order+1] = fi end
+    table.sort(order, function(a, b) return a > b end)
+    for _, fi in ipairs(order) do
+      if reaper.TrackFX_Delete(slot.tr, fi) then
+        removed = removed + 1
+      else
+        add_error(nil, ti, fi, "TrackFX_Delete failed")
+      end
+    end
+    tracks_out[#tracks_out+1] = {track_index = ti, fx_count = reaper.TrackFX_GetCount(slot.tr)}
+  end
+  table.sort(tracks_out, function(a, b) return a.track_index < b.track_index end)
+  reaper.Undo_EndBlock("MCP: fx_remove_batch", -1)
+  return {success = true, removed = removed, tracks = tracks_out, errors = errors}
 end
 
 function fx.fx_get_chain(p)
@@ -1468,14 +1642,16 @@ end
 function fx.fx_get_params(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  if not p.fx_index then return nil, "Missing parameter: fx_index" end
-  return build_fx_params(tr, math.floor(p.fx_index), p.max_results)
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
+  return build_fx_params(tr, fi, p.max_results)
 end
 
 function fx.fx_set_param(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   local pi = require_int(p, "param_index")
   local val_in = require_num(p, "value")
   reaper.TrackFX_SetParam(tr, fi, pi, val_in)
@@ -1489,7 +1665,8 @@ end
 function fx.fx_set_param_by_name(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   if p.param_name == nil then return nil, "Missing parameter: param_name" end
   if p.value == nil then return nil, "Missing parameter: value" end
   local num = reaper.TrackFX_GetNumParams(tr, fi)
@@ -1512,8 +1689,8 @@ end
 function fx.fx_scan_params(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  if not p.fx_index then return nil, "Missing parameter: fx_index" end
-  local fi = math.floor(p.fx_index)
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   local max_params = p.max_params or 200
 
   local num = reaper.TrackFX_GetNumParams(tr, fi)
@@ -1576,7 +1753,8 @@ end
 function fx.fx_enable(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   reaper.TrackFX_SetEnabled(tr, fi, true)
   return build_fx_chain(tr)
 end
@@ -1584,7 +1762,8 @@ end
 function fx.fx_disable(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   reaper.TrackFX_SetEnabled(tr, fi, false)
   return build_fx_chain(tr)
 end
@@ -1592,7 +1771,8 @@ end
 function fx.fx_show_ui(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   reaper.TrackFX_Show(tr, fi, 1)
   return build_fx_info(tr, fi)
 end
@@ -1600,7 +1780,8 @@ end
 function fx.fx_get_preset(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   local _, preset = reaper.TrackFX_GetPreset(tr, fi, "")
   local _, fx_name = reaper.TrackFX_GetFXName(tr, fi, "")
   local pi, total_presets = reaper.TrackFX_GetPresetIndex(tr, fi)
@@ -1618,7 +1799,8 @@ function fx.fx_set_preset(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
   if not p.preset_name then return nil, "Missing parameter: preset_name" end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   local requested = tostring(p.preset_name)
 
   local applied = reaper.TrackFX_SetPreset(tr, fi, requested)
@@ -1658,7 +1840,8 @@ end
 function fx.fx_navigate_preset(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   local dir = require_int(p, "direction")
   reaper.TrackFX_NavigatePresets(tr, fi, dir)
   local _, preset = reaper.TrackFX_GetPreset(tr, fi, "")
@@ -1705,8 +1888,10 @@ end
 function fx.fx_move(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
-  local ni = require_int(p, "new_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
+  local ni, nerr = get_fx_index(tr, p, "new_index")
+  if not ni then return nil, nerr end
   reaper.TrackFX_CopyToTrack(tr, fi, tr, ni, true)
   return build_fx_chain(tr)
 end
@@ -1717,7 +1902,8 @@ end
 function fx.fx_rename(p)
   local tr, idx, err = get_track(p)
   if not tr then return nil, err end
-  local fi = require_int(p, "fx_index")
+  local fi, ferr = get_fx_index(tr, p)
+  if not fi then return nil, ferr end
   if p.new_name == nil then return nil, "Missing parameter: new_name" end
   local new_name = tostring(p.new_name)
   if #new_name > 1000 then return nil, "new_name exceeds 1000 characters" end
@@ -3910,7 +4096,7 @@ function compose.configure_tracks(p)
 
   for _, entry in ipairs(tracks_data) do
     local ti = math.floor(entry.track_index)
-    local tr = reaper.GetTrack(0, ti)
+    local tr = batch_track_from_index(ti)
     if not tr then
       reaper.Undo_EndBlock("configure_tracks", -1)
       return nil, "Track not found: " .. ti
@@ -4050,7 +4236,7 @@ function compose.setup_fx_chain(p)
 
   for _, entry in ipairs(data) do
     local ti = math.floor(entry.track_index)
-    local tr = reaper.GetTrack(0, ti)
+    local tr = batch_track_from_index(ti)
     if not tr then
       -- Real, confirmed robustness gap this closes: a single bad
       -- track_index used to abort the ENTIRE batch (hard return, no
@@ -4996,7 +5182,7 @@ function track.track_get_peak(p)
 end
 
 function track.track_freeze(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   reaper.SetOnlyTrackSelected(tr)
   -- 41223 = Track: Freeze to stereo (render pre-fader) — the common choice
@@ -5005,7 +5191,7 @@ function track.track_freeze(p)
 end
 
 function track.track_unfreeze(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   reaper.SetOnlyTrackSelected(tr)
   -- 41644 = Track: Unfreeze tracks
@@ -5183,7 +5369,7 @@ local function reguid_track_chunk(chunk)
 end
 
 function track.track_set_state_chunk(p)
-  local tr, idx, err = get_track(p)
+  local tr, idx, err = get_numbered_track(p)
   if not tr then return nil, err end
   if type(p.chunk) ~= "string" or p.chunk == "" then
     return nil, "chunk must be a non-empty string"
@@ -5332,6 +5518,60 @@ for k, v in pairs(tempo) do handlers[k] = v end
 for k, v in pairs(script) do handlers[k] = v end
 
 -- ============================================================
+-- UI-refresh / undo-block safety net
+-- ============================================================
+
+-- Handlers open PreventUIRefresh(1) and undo blocks and close them on their
+-- last lines. If one throws in between (a malformed entry is enough), the
+-- pcall in process_command catches the error but the closing calls never
+-- run: REAPER's UI would stay frozen and the undo block open. This wraps
+-- the three calls to count every open/close, and returns an unwind function
+-- that closes whatever a command left open. The wrapper only counts and
+-- passes every argument and return value straight through. ReaScript gives
+-- each script its own Lua state, so this touches no other script.
+local function install_block_guard(api)
+  local state = {ui_depth = 0, undo_open = 0}
+  local real_prevent = api.PreventUIRefresh
+  local real_begin = api.Undo_BeginBlock
+  local real_end = api.Undo_EndBlock
+
+  api.PreventUIRefresh = function(n)
+    state.ui_depth = state.ui_depth + n
+    return real_prevent(n)
+  end
+  api.Undo_BeginBlock = function()
+    state.undo_open = state.undo_open + 1
+    return real_begin()
+  end
+  api.Undo_EndBlock = function(description, flags)
+    -- Handlers also close early on error paths, so never go below zero.
+    if state.undo_open > 0 then state.undo_open = state.undo_open - 1 end
+    return real_end(description, flags)
+  end
+
+  -- Close anything the last command left open. Returns how much it closed.
+  return function()
+    local unwound = {ui = 0, undo = 0}
+    if state.ui_depth > 0 then
+      unwound.ui = state.ui_depth
+      real_prevent(-state.ui_depth)
+    end
+    while state.undo_open > 0 do
+      -- Ending the block (rather than discarding it) records the partial
+      -- work as one undo point, so the user can still undo it.
+      real_end("MCP: aborted (unbalanced undo block)", -1)
+      state.undo_open = state.undo_open - 1
+      unwound.undo = unwound.undo + 1
+    end
+    state.ui_depth = 0
+    state.undo_open = 0
+    return unwound
+  end
+end
+
+local unwind_open_blocks = install_block_guard(reaper)
+
+-- ============================================================
 -- Main loop
 -- ============================================================
 
@@ -5369,6 +5609,17 @@ local function process_command()
   end
 
   local ok, result, err = pcall(handler, cmd.params or {})
+
+  -- Before any response is written, whatever the outcome: close a UI
+  -- refresh hold or undo block the command left open.
+  local unwound = unwind_open_blocks()
+  if unwound.ui > 0 or unwound.undo > 0 then
+    reaper.ShowConsoleMsg(string.format(
+      "ReaperMCP: '%s' left %d UI refresh hold(s) and %d undo block(s) open; closed them.\n",
+      tostring(cmd.command), unwound.ui, unwound.undo))
+    reaper.UpdateArrange()
+  end
+
   if not ok then
     -- pcall failed — result contains the error message
     local errmsg = "Internal error: " .. tostring(result)

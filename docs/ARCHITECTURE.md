@@ -116,7 +116,7 @@ Modules without a `register(...)` function (e.g., `compose_helpers.py`) are sile
 
 ## The Lua bridge
 
-`reaper_scripts/reaper_mcp_server.lua` is ~3 600 lines and runs as a deferred ReaScript (i.e., REAPER calls its main function on every UI tick). Each tick it:
+`reaper_scripts/reaper_mcp_server.lua` is ~5 500 lines and runs as a deferred ReaScript (i.e., REAPER calls its main function on every UI tick). Each tick it:
 
 1. Refreshes the lock file mtime (heartbeat).
 2. Checks for `command.json`. If present, parses and dispatches.
@@ -125,6 +125,22 @@ Modules without a `register(...)` function (e.g., `compose_helpers.py`) are sile
 Every handler is a static function keyed by name in a dispatch table — **no `dofile`, no `load`, no `loadstring`**. That means every command corresponds to explicit, reviewable Lua code with input validation per handler.
 
 The bridge is cross-platform: it detects OS via `reaper.GetOS()` and picks the right temp directory without the Python side having to tell it.
+
+### Failure containment
+
+Every command runs under `pcall`, so an error in a handler returns an error response instead of stopping the bridge. Two REAPER states can outlive a throw, though: a `PreventUIRefresh` hold (the UI stays frozen) and an open undo block. Handlers close both on their last lines, which a throw skips.
+
+`install_block_guard` wraps `PreventUIRefresh`, `Undo_BeginBlock` and `Undo_EndBlock` once at startup. The wrapper only counts and passes every argument and return value through. After each command, whatever its outcome and before any response is written, the dispatcher calls the returned unwind function, which releases any refresh hold and ends any open undo block. Ending the block records the partial work as one undo point, so it can still be undone. When something had to be unwound, the bridge notes it in REAPER's console. Handlers need no per-handler `pcall` for this, and new handlers are covered automatically (`tests/test_lua_block_guard.py`).
+
+### Track addressing and the master track
+
+REAPER keeps the master track outside its numbered track list: `GetTrack(0, i)` never returns it, `GetMasterTrack(0)` does. The bridge exposes it as `track_index = -1`, resolved in one place:
+
+- **`get_track(params, key)`** — the standard lookup used by most handlers. Resolves `-1` to the master track, any other index to a numbered track.
+- **`get_numbered_track(params, key)`** — `get_track` that refuses `-1`. Used by handlers where the master track is meaningless or dangerous: `track_delete_batch` (for each target it resolves), `track_freeze`, `track_unfreeze`, `track_set_folder`, `track_set_input`, `track_set_record_arm` and `track_set_state_chunk`.
+- **`batch_track_from_index(ti)`** — the same `-1` rule for the batch entry points (`setup_fx_chain`, `configure_tracks`) that receive a raw index per entry instead of a params table.
+
+Which tools accept `-1` is therefore decided twice: the Python tool validates first, and the Lua handler enforces it again. A destructive handler keeps refusing the master even if a Python guard is later loosened. New handlers that act on a track should use `get_numbered_track` unless acting on the master is meaningful. The behaviour of both lookups is tested by running the real Lua helpers under `lupa` with a stubbed `reaper` (`tests/test_lua_master_guard.py`).
 
 ---
 

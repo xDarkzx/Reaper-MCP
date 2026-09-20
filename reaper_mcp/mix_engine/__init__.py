@@ -355,6 +355,14 @@ async def _run_legacy_pipeline(client, track_map, plugin_profile, suite, clean):
     }
 
 
+async def _remove_fx_indices(client, track_index: int, fx_indices: list[int]) -> None:
+    """Remove several FX from one track in a single fx_remove_batch call."""
+    await client.execute(
+        "fx_remove_batch",
+        entries=json.dumps([{"track_index": track_index, "fx_indices": fx_indices}]),
+    )
+
+
 async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
     """Remove previously-added mix EQ/compressor from the given tracks and
     delete MIX:* reverb buses.
@@ -378,14 +386,13 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
             fx_chain = data.get("fx_chain", [])
 
             # Primary pass — remove anything we tagged with [MIX].
-            any_tagged = False
-            for fx in reversed(fx_chain):
-                fx_name = fx.get("name", "")
-                if fx_name.startswith(_MIX_FX_PREFIX):
-                    await client.execute("fx_remove", track_index=ti, fx_index=fx["index"])
-                    logger.info("Cleanup: removed tagged %r from track %d", fx_name, ti)
-                    removed += 1
-                    any_tagged = True
+            tagged = [fx for fx in fx_chain if fx.get("name", "").startswith(_MIX_FX_PREFIX)]
+            any_tagged = bool(tagged)
+            if tagged:
+                await _remove_fx_indices(client, ti, [fx["index"] for fx in tagged])
+                for fx in tagged:
+                    logger.info("Cleanup: removed tagged %r from track %d", fx.get("name", ""), ti)
+                removed += len(tagged)
 
             # Fallback pass — only if no tagged FX were found. Preserves
             # old-project behaviour but is less safe (can match user FX).
@@ -393,16 +400,16 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
                 chain_result = await client.execute("fx_get_chain", track_index=ti)
                 data = chain_result.get("data", chain_result)
                 fx_chain = data.get("fx_chain", [])
-                for fx in reversed(fx_chain):
-                    fx_name = fx.get("name", "")
-                    for mix_fx_name in _MIX_EQ_NAMES | _MIX_COMPRESSOR_NAMES:
-                        if mix_fx_name in fx_name:
-                            await client.execute(
-                                "fx_remove", track_index=ti, fx_index=fx["index"]
-                            )
-                            logger.info("Cleanup (fallback): removed %r from track %d", fx_name, ti)
-                            removed += 1
-                            break
+                mix_names = _MIX_EQ_NAMES | _MIX_COMPRESSOR_NAMES
+                matched = [
+                    fx for fx in fx_chain
+                    if any(name in fx.get("name", "") for name in mix_names)
+                ]
+                if matched:
+                    await _remove_fx_indices(client, ti, [fx["index"] for fx in matched])
+                    for fx in matched:
+                        logger.info("Cleanup (fallback): removed %r from track %d", fx.get("name", ""), ti)
+                    removed += len(matched)
         except Exception as e:
             logger.warning("Could not clean FX on track %d: %s", ti, e)
 
@@ -411,11 +418,15 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
         all_tracks = await client.execute("track_get_all")
         data = all_tracks.get("data", all_tracks)
         tracks = data.get("tracks", [])
-        for t in reversed(tracks):
-            name = t.get("name", "")
-            if name.startswith(_REVERB_BUS_PREFIX):
-                await client.execute("track_delete", track_index=t["index"])
-                buses_removed += 1
+        bus_indices = [
+            t["index"] for t in tracks if t.get("name", "").startswith(_REVERB_BUS_PREFIX)
+        ]
+        if bus_indices:
+            await client.execute(
+                "track_delete_batch",
+                entries=json.dumps([{"track_indices": sorted(bus_indices, reverse=True)}]),
+            )
+            buses_removed = len(bus_indices)
     except Exception as e:
         logger.warning("Could not clean reverb buses: %s", e)
 

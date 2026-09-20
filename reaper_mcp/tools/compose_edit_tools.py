@@ -2,6 +2,8 @@
 
 import json
 import logging
+import math
+import re
 
 from mcp.server.fastmcp import FastMCP
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
@@ -39,6 +41,116 @@ def _validate_color_array(color, context: str):
             )
 
 
+_MAX_SETUP_FX_CHAIN_ENTRIES = 200
+_MAX_FX_PER_TRACK = 50
+_MAX_PARAMS_PER_FX_ENTRY = 1000
+_ADD_MODES = ("add", "find_or_add", "find_only")
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_finite_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _validate_fx_param_map(params, key: str, context: str) -> None:
+    """`params` (name -> value) / `params_by_index` ("<index>" -> value) shape."""
+    if not isinstance(params, dict):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: {key} must be an object")
+    if len(params) > _MAX_PARAMS_PER_FX_ENTRY:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            f"{context}: too many {key}: {len(params)} (max {_MAX_PARAMS_PER_FX_ENTRY})",
+        )
+    for name, value in params.items():
+        if key == "params_by_index" and not re.fullmatch(r"[0-9]+", name):
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                f"{context}: params_by_index keys must be non-negative integers, got {name!r}",
+            )
+        if not _is_finite_number(value):
+            raise ReaperMCPError(
+                ErrorCode.INVALID_PARAMETER,
+                f"{context}: {key}[{name!r}] must be a finite number, got {value!r}",
+            )
+
+
+def _validate_fx_chain_item(item, context: str) -> None:
+    if not isinstance(item, dict):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: must be an object")
+
+    name = item.get("name")
+    fx_index = item.get("fx_index")
+    if name is None and fx_index is None:
+        # The Lua side skips an item like this without a word, which reads
+        # as success for something that never happened.
+        raise ReaperMCPError(
+            ErrorCode.INVALID_PARAMETER,
+            f"{context}: needs a name (to add a plugin) or an fx_index (to target one already on the track)",
+        )
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: name must be a non-empty string")
+    if fx_index is not None and (not _is_int(fx_index) or fx_index < 0):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: fx_index must be an int >= 0")
+
+    add_mode = item.get("add_mode")
+    if add_mode is not None and add_mode not in _ADD_MODES:
+        raise ReaperMCPError(
+            ErrorCode.INVALID_PARAMETER,
+            f"{context}: add_mode must be one of {', '.join(_ADD_MODES)}, got {add_mode!r}",
+        )
+    for key in ("params", "params_by_index"):
+        if item.get(key) is not None:
+            _validate_fx_param_map(item[key], key, context)
+    if item.get("preset") is not None and not isinstance(item["preset"], str):
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: preset must be a string")
+
+
+def _validate_setup_fx_chain_entries(entries) -> None:
+    """Validate setup_fx_chain's parsed `tracks` array before it reaches REAPER."""
+    if not isinstance(entries, list) or len(entries) == 0:
+        raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "tracks must be a non-empty JSON array")
+    if len(entries) > _MAX_SETUP_FX_CHAIN_ENTRIES:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            f"Too many entries: {len(entries)} (max {_MAX_SETUP_FX_CHAIN_ENTRIES})",
+        )
+
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i} must be an object")
+        if "track_index" not in entry:
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i} missing track_index")
+        track_index = entry["track_index"]
+        if not _is_int(track_index):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i}: track_index must be an int")
+        if track_index < MASTER_TRACK_INDEX:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"Entry {i}: track_index must be >= 0, or -1 for the master track",
+            )
+
+        chain = entry.get("fx_chain")
+        if chain is None:
+            continue
+        if isinstance(chain, str):  # the Lua side accepts a JSON string here too
+            try:
+                chain = json.loads(chain)
+            except json.JSONDecodeError:
+                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i}: fx_chain is not valid JSON")
+        if not isinstance(chain, list):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i}: fx_chain must be an array")
+        if len(chain) > _MAX_FX_PER_TRACK:
+            raise ReaperMCPError(
+                ErrorCode.VALUE_OUT_OF_RANGE,
+                f"Entry {i}: too many FX on one track: {len(chain)} (max {_MAX_FX_PER_TRACK})",
+            )
+        for j, item in enumerate(chain):
+            _validate_fx_chain_item(item, f"Entry {i}, fx_chain[{j}]")
+
+
 def _load_state_safe(state_path: str) -> set[int]:
     """Load composed_tracks.json and return the set of composed track indices.
 
@@ -67,6 +179,13 @@ def _load_state_safe(state_path: str) -> set[int]:
     except (TypeError, ValueError) as e:
         logger.warning("composed_tracks.json entries malformed (%s) — treating as empty", e)
         return set()
+
+
+# The master track is addressed as index -1, the same convention the fx_*
+# tools use. Applies to the batch tools here (configure_tracks,
+# setup_fx_chain) so a mastering chain can be built in the same call as
+# track FX, instead of only via engine_master, which replaces the chain.
+MASTER_TRACK_INDEX = -1
 
 
 def register(mcp: FastMCP):
@@ -177,8 +296,11 @@ def register(mcp: FastMCP):
         for i, entry in enumerate(tracks_data):
             if "track_index" not in entry:
                 raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i} missing track_index")
-            if not isinstance(entry["track_index"], int) or entry["track_index"] < 0:
-                raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, f"Entry {i}: track_index must be >= 0")
+            if not isinstance(entry["track_index"], int) or entry["track_index"] < MASTER_TRACK_INDEX:
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"Entry {i}: track_index must be >= 0, or -1 for the master track",
+                )
             if "color" in entry and entry["color"] is not None:
                 _validate_color_array(entry["color"], f"Entry {i}")
 
@@ -384,7 +506,11 @@ def register(mcp: FastMCP):
 
         Args:
             tracks: JSON array, one object per track:
-                `{"track_index": int, "fx_chain": [...]}`. Each `fx_chain`
+                `{"track_index": int, "fx_chain": [...]}`, where
+                `track_index` is 0-based, or **-1 for the master track** —
+                so a full mastering chain (EQ -> compressor -> saturation ->
+                limiter, with params) can be built in one call, without
+                engine_master wiping the existing chain. Each `fx_chain`
                 entry is one FX to add-and/or-configure:
                 - `"name": str` — add new via fuzzy match (default mode).
                   `"add_mode": "find_or_add"` reuses an existing instance of
@@ -415,12 +541,7 @@ def register(mcp: FastMCP):
         except (json.JSONDecodeError, TypeError):
             raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "Invalid tracks JSON")
 
-        if not isinstance(data, list) or len(data) == 0:
-            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, "tracks must be a non-empty JSON array")
-
-        for i, entry in enumerate(data):
-            if "track_index" not in entry:
-                raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"Entry {i} missing track_index")
+        _validate_setup_fx_chain_entries(data)
 
         return await client.execute_long("setup_fx_chain", tracks=tracks)
 
