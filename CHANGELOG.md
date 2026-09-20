@@ -2,6 +2,116 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [0.8.0] - 2026-09-21
+
+### Added
+
+- **Master track is addressable as `track_index=-1`.** REAPER keeps the
+  master outside the numbered track list (`GetTrack` never returns it,
+  `GetMasterTrack` does), so the FX tools could not reach it at all. The
+  Lua `get_track` helper now maps `-1` to the master, and every `fx_*`
+  tool that takes a `track_index` accepts it — chain inspection,
+  parameters and scanning, enable/disable, presets, move, rename, UI, and
+  pin mappings. Anything below `-1` is still rejected.
+- **`setup_fx_chain` and `configure_tracks` accept `-1` too**, so a full
+  mastering chain (EQ, compressor, saturation, limiter — with parameters)
+  can be built in the same call as track FX, without going through
+  `engine_master`, which replaces the master chain. This applies to those
+  two batch entry points only; no other tool gained master access.
+- **`fx_remove_batch`** — remove one FX, several, or an entire chain,
+  across one or many tracks, in one call. Each entry names a `track_index`
+  (`-1` for master) and exactly one of `all`, `fx_index`, or `fx_indices`.
+  Indices are resolved against every chain as it stands when the call
+  starts and deleted highest-first, so overlapping or out-of-order entries
+  cannot shift an index mid-batch. A bad track or index is reported in the
+  response's `errors` array without aborting the rest, and the whole call
+  is a single undo step. Follows the same pattern as `items_apply` and
+  `markers_apply`.
+- **`track_delete_batch`** — delete one track, several, or every track in
+  one call. Each entry has exactly one of `all`, `track_index` or
+  `track_indices`. Targets are resolved against the numbering at the start
+  of the call and deleted highest-first, so entry order and overlapping
+  entries can't shift an index. The master track is refused per entry, a
+  bad index is reported in `errors` without aborting the rest, and the
+  response lists what was deleted by original index and name. Takes the
+  usual pre-action project backup and is a single undo step.
+
+### Changed
+
+- **Upgrading: update the Lua script together with the package.** The new
+  batch tools depend on handlers in `reaper_scripts/reaper_mcp_server.lua`
+  (`fx_remove_batch`, `track_delete_batch`) and on the master-track and
+  safety changes below. A 0.8.0 server talking to an older script reports
+  "Unknown command" for them. If you installed from PyPI, re-download the
+  script from the repo and restart REAPER.
+- **`track_delete` (single track) is removed in favour of
+  `track_delete_batch`.** A batch of one entry does everything the old
+  tool did (`[{"track_index": 3}]`). Anything calling `track_delete` by
+  name must switch. The mix engine's cleanup of its own `MIX:` reverb
+  buses now deletes them with one batch call instead of one call per bus.
+- **`fx_remove` (single FX) is removed in favour of `fx_remove_batch`.**
+  A batch of one entry does everything the old tool did. Anything calling
+  `fx_remove` by name must switch to `fx_remove_batch`
+  (`[{"track_index": 2, "fx_index": 3}]`). The mix engine's cleanup of its
+  own `[MIX]`-tagged FX now removes them with one batch call per track
+  instead of one call per FX.
+- **The publish workflow now runs `ruff check .` before building.** Lint
+  was a gate only in the CI workflow, so a version tag could publish a
+  commit whose tests passed but whose static analysis had not run. The
+  `build` job now needs both `lint` and `test`.
+- **Documentation corrected to match the code.** The README's headline
+  said 182 tools across 26 modules; the default profile registers 180
+  across 27. The instruction-size column in the profile table in
+  `docs/TOOLS.md` is refreshed for the instruction text added in this
+  release. `docs/ARCHITECTURE.md` gains sections on failure containment and
+  on track addressing and the master track.
+
+### Security
+
+- **Destructive track handlers refuse the master track in Lua, not just in
+  Python.** Widening `get_track` to resolve `-1` meant ~40 handlers could
+  reach the master track, with only the Python guards in front deciding
+  which. `track_delete_batch` (per entry), `track_freeze`, `track_unfreeze`,
+  `track_set_folder`, `track_set_input`, `track_set_record_arm` and
+  `track_set_state_chunk` now use a `get_numbered_track` helper that keeps
+  refusing `-1` if a Python guard is later loosened. Tests run the real
+  helpers under `lupa` with a stubbed `reaper` to check both behaviours.
+
+### Fixed
+
+- **A command that failed part-way could leave REAPER's UI frozen and an
+  undo block open.** Eight handlers (`setup_fx_chain`, `setup_effect_bus`,
+  `setup_sidechain`, `item_clone_to_position`, `item_duplicate`, both
+  `item_split_*` handlers and `take_set_reversed`) hold `PreventUIRefresh`
+  while they work, and about 40 open an undo block, closing both on their
+  last lines. A malformed entry that threw in between was caught by the
+  dispatcher, but the closing calls never ran. Only `setup_master_chain`
+  was protected. The bridge now counts every open and close, and after each
+  command — success or failure — closes whatever it left open, recording
+  partial work as a single undo point and noting it in REAPER's console.
+  One safeguard in the dispatcher covers every handler, including future
+  ones.
+- **FX tools reported success for an FX index that doesn't exist.**
+  `fx_enable`, `fx_disable`, `fx_move`, `fx_get_params`, `fx_get_preset`,
+  `fx_navigate_preset`, `fx_rename`, `fx_scan_params`, `fx_set_param`,
+  `fx_set_param_by_name`, `fx_set_preset` and `fx_show_ui` called REAPER
+  without checking the index, and REAPER quietly does nothing for one that
+  isn't there — so `fx_enable(track, 99)` came back as a success with the
+  chain unchanged. They now return `fx_index N out of range (chain has M)`.
+  `fx_move` checks its `new_index` the same way.
+- **`setup_fx_chain` validated almost nothing before reaching REAPER.**
+  A non-object entry raised a raw `TypeError`, a chain item with neither a
+  `name` nor an `fx_index` was silently skipped (reading as a success for
+  something that never happened), and entry counts were unbounded. It now
+  checks entry and chain shapes, `track_index` type and range, `add_mode`,
+  `params` / `params_by_index` keys and finite values, and `preset`, with
+  per-entry errors and caps of 200 entries, 50 FX per track and 1000
+  parameters per FX entry.
+- **`safe_path`'s system-directory blocklist missed macOS symlinked
+  directories.** `/etc`, `/tmp` and `/var` are symlinks into `/private/...`
+  on macOS, so a resolved path compared against the unresolved blocklist
+  entry slipped through. Both sides are now resolved before comparing.
+
 ## [0.7.1] - 2026-09-16
 
 ### Added
