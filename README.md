@@ -9,7 +9,7 @@
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-purple.svg" alt="MCP Compatible" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.8.0-orange.svg" alt="v0.8.0" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.8.1-orange.svg" alt="v0.8.1" /></a>
   <a href="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml"><img src="https://github.com/xDarkzx/Reaper-MCP/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://www.reaper.fm/"><img src="https://img.shields.io/badge/REAPER-7%2B-red.svg" alt="REAPER 7+" /></a>
   <a href="https://discord.gg/BGn8Ujh37m"><img src="https://img.shields.io/discord/1530363483701510154?label=discord&logo=discord&color=5865F2" alt="Discord" /></a>
@@ -34,7 +34,7 @@
 
 ReaperMCP connects any MCP-compatible AI assistant to [REAPER](https://www.reaper.fm/), giving it full control over music production. Talk to your AI assistant and it composes, mixes, masters, and *measures* your music in real-time — the AI chooses every note, rhythm, and CC itself.
 
-**180 tools across 27 modules** cover the full workflow: MIDI composition and patterns, a vocal-chop pipeline, FX and automatic genre-tuned mixing/mastering (35 style profiles), sends and routing, and post-production QC — batch editing, ReaScript automation, silence/click detection.
+**181 tools across 26 modules** cover the full workflow: MIDI composition and patterns, a vocal-chop pipeline, FX and automatic genre-tuned mixing/mastering (35 style profiles), sends and routing, and post-production QC — batch editing, ReaScript automation, silence/click detection.
 
 **No cloud. Nothing leaves your machine.** ReaperMCP runs entirely locally through a file-based Lua IPC bridge inside REAPER — your project, audio, and MIDI stay on your computer. Bring whatever AI client you already use (Claude Desktop, Claude Code, Cursor, any MCP client) — ReaperMCP handles REAPER.
 
@@ -166,14 +166,14 @@ Open your AI client and start talking:
 
 ## Features
 
-### 180 Tools Across 26 Modules
+### 181 Tools Across 26 Modules
 
 | Category | Tools | Highlights |
 |----------|------:|------------|
 | **Transport** | 11 | Play, stop, pause, record, set BPM, time signature, playrate, toggle repeat/metronome |
 | **Tracks** | 18 | Create, delete, rename, volume, pan, mute, solo, arm, colour, input, folder, mixer state, peak meter, freeze/unfreeze |
 | **Track Templates** | 4 | Save, apply, list, and delete REAPER track templates |
-| **Project** | 18 | New, open, save, save-as, backup, export audio (WAV/MP3/OGG/FLAC/AIFF), undo/redo, notes, grid, render metadata (`project_get/set_metadata`), Notes-tab Title/Author (`project_get/set_notes_info`), `project_get_overview` (change count + info in one call) |
+| **Project** | 19 | New, open, save, save-as, backup, export audio (WAV/MP3/OGG/FLAC/AIFF), undo/redo (by count, or a whole tool run), notes, grid, render metadata (`project_get/set_metadata`), Notes-tab Title/Author (`project_get/set_notes_info`), `project_get_overview` (change count + info in one call) |
 | **Items** | 14 | Get/select/split/delete/move items, set length/volume/mute/fade, insert media, create MIDI, move to track, `items_apply` (batch edits) |
 | **Takes** | 4 | List, add, delete, and switch active take |
 | **MIDI** | 15 | Insert notes (single/batch), edit/delete notes, insert/delete CC, Program Change/Bank Select (`midi_insert_program_change`), read program names (`midi_list_programs`), count events, note names, sort, set extents (CC reading intentionally omitted — see below) |
@@ -201,7 +201,7 @@ Open your AI client and start talking:
 
 ### Tool profiles
 
-The default 180-tool surface is designed for full-featured frontier models. Smaller/cheaper models (Groq Llama 3 caps at 128 tools, some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's server config to pick a workflow-specific subset:
+The default 181-tool surface is designed for full-featured frontier models. Smaller/cheaper models (Groq Llama 3 caps at 128 tools, some local models lower still) will silently truncate. Set `REAPER_MCP_PROFILE` in your client's server config to pick a workflow-specific subset:
 
 | Profile | Tools | For |
 |---------|------:|-----|
@@ -313,7 +313,7 @@ Reaper-MCP/
 │   │       ├── pop.py              # 4 pop subgenres
 │   │       ├── electronic.py       # synthwave, lofi, ambient, hiphop
 │   │       └── _shared.py          # Shared role → EQ/comp library
-│   └── tools/                      # 26 modules, 180 auto-registered tools
+│   └── tools/                      # 26 modules, 181 auto-registered tools
 │       ├── transport_tools.py      # Playback and recording (11)
 │       ├── track_tools.py          # Track management + freeze (18)
 │       ├── template_tools.py       # Track templates (4)

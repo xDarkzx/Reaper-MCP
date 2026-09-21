@@ -2,6 +2,80 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [0.8.1] - 2026-09-21
+
+### Added
+
+- **`project_undo` and `project_redo` take a `steps` count (1-100).** Undo
+  just the last two or three commands of a ten-command tool in one call.
+  The response lists every step undone, most recent first, and stops early
+  if the history runs out. A plain call still undoes one step.
+- **`project_undo_group`** — undo every consecutive step of the most recent
+  multi-command tool run (say, everything `engine_mix` just did) in one
+  call. It stops at the first step that belongs to something else, leaves
+  earlier runs of the same tool alone, and refuses, changing nothing, when
+  the last step didn't come from such a run.
+
+### Fixed
+
+- **Undoing an item, MIDI or take edit restored nothing.** Live testing
+  showed that undoing `item_create_midi` reported the step as undone while
+  the item stayed on the track, and the same held for note inserts and the
+  other item, MIDI and take handlers (20 of them, including
+  `midi_insert_notes_batch`, `items_apply`, `item_duplicate`,
+  `item_split_at_positions`, `take_set_pitch` and `wipe_all_midi`). Cause:
+  REAPER's undo blocks do not capture this data when called from the bridge,
+  so the step they leave is empty or missing. These handlers' steps are now
+  recorded by the dispatcher instead, and their own blocks stay out of
+  REAPER. Each command is recorded with exactly one REAPER call, chosen by
+  what it changes: the call that captures items, MIDI and takes for those
+  (`Undo_OnStateChange2`), and the flagged call for everything else
+  (track, FX, send, marker, tempo). Calling both for one command was tried
+  and rejected, because REAPER syncs item state lazily and a tool sending
+  commands back to back sometimes left two identical steps. Tests fail if a
+  command that changes items or MIDI is left to an undo block or recorded
+  with the wrong call.
+- **Simple edits had no undo step of their own, so undo skipped past
+  them.** Batch and structural tools wrap their work in a named undo block,
+  so one Ctrl+Z reverses a whole call. But a fader, pan, mute, send, marker,
+  item or tempo edit did not: REAPER's undo skipped over it and rolled back
+  an earlier step instead. The dispatcher now records one named step,
+  `MCP: <command>`, after each of 75 such commands succeeds. Failed,
+  read-only, transport, selection, file and undo/redo commands add no step
+  (recording a point after an undo would erase the redo stack). REAPER
+  already records its own step for plugin bypass and reordering, and those
+  stay a single step.
+- **A multi-command tool's undo steps couldn't be told apart or undone
+  together.** `engine_mix`, `engine_master`, `engine_fix_mix`,
+  `chop_pipeline`, `stack_chop_layers`, `compose_arrangement`,
+  `demo_edm_project`, `load_loops`, `setup_vocal_chain`, `setup_drum_bus`,
+  `setup_parallel_compression`, `setup_sidechain`, `create_drum_pattern`,
+  `create_chord_progression` and `wipe_all_midi` leave one undo step per
+  command they run, which is what lets you take back just the last few. But
+  those steps carried no sign of which tool made them, so undoing "what
+  engine_mix just did" meant counting. These tools now run inside an undo
+  group that labels each step `MCP: <tool>#<run> > <command>`. A group only
+  labels and holds nothing open in REAPER (REAPER drops an undo block held
+  open between bridge ticks). It closes even if the tool fails, is skipped
+  harmlessly by an older bridge script, and stops labelling by itself after
+  60 seconds idle if the server process dies.
+- **A new command can't silently miss an undo step.** Every handler that
+  changes the project is classified either as recorded or as deliberately
+  exempt with a reason, and a test fails when a handler is added without a
+  decision.
+
+Verified on live REAPER with the release code, checking the actual state
+after each undo. A fader move, item creation, MIDI notes, an item move, a
+marker and a tempo marker each undo as one step that restores the state.
+A sequence of 16 changes (three grouped `create_drum_pattern` runs plus item,
+notes, move, fader, marker, tempo, send and plugin edits) left exactly 16
+steps with no duplicates; undoing all 16 (`project_undo(steps=16)`) removed
+every trace, and redoing all 16 restored the tracks, items, notes, volume,
+send, plugin, marker and tempo marker exactly. `project_undo_group` undoes
+a grouped run's steps together and leaves earlier steps alone, and
+block-based handlers (`setup_fx_chain`, batch track delete, batch plugin
+removal) still undo cleanly.
+
 ## [0.8.0] - 2026-09-21
 
 ### Added
@@ -60,8 +134,9 @@ All notable changes to ReaperMCP will be documented in this file.
   commit whose tests passed but whose static analysis had not run. The
   `build` job now needs both `lint` and `test`.
 - **Documentation corrected to match the code.** The README's headline
-  said 182 tools across 26 modules; the default profile registers 180
-  across 27. The instruction-size column in the profile table in
+  said 182 tools; the default profile registers 180 across 26 modules. The
+  module count in `docs/TOOLS.md` was also off by one (it counted a helper
+  module that registers no tools). The instruction-size column in the profile table in
   `docs/TOOLS.md` is refreshed for the instruction text added in this
   release. `docs/ARCHITECTURE.md` gains sections on failure containment and
   on track addressing and the master track.
