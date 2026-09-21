@@ -1,6 +1,7 @@
 """Sidechain MCP tool — set up kick→bass/pad pumping and ducking."""
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 
@@ -8,6 +9,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
+    @undo_grouped(client, "setup_sidechain")
     async def setup_sidechain(
         source_track: int,
         target_track: int,

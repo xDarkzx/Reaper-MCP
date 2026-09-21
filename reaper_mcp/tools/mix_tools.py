@@ -3,6 +3,7 @@
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp.tools.compose_helpers import _build_live_track_map
 from reaper_mcp.safety import ensure_backup
 
@@ -13,6 +14,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
+    @undo_grouped(client, "engine_fix_mix")
     async def engine_fix_mix(style: str = "", include_master: bool = True) -> dict:
         """Rescue a muddy / harsh / unbalanced mix with a single call.
 
@@ -41,6 +43,7 @@ def register(mcp: FastMCP):
         return await run_fix_mix(client, style, include_master)
 
     @mcp.tool()
+    @undo_grouped(client, "engine_master")
     async def engine_master(style: str, clean: bool = True) -> dict:
         """Apply a professional mastering chain to the master bus for the given style.
 
@@ -73,6 +76,7 @@ def register(mcp: FastMCP):
         return result
 
     @mcp.tool()
+    @undo_grouped(client, "engine_mix")
     async def engine_mix(style: str = "", clean: bool = True) -> dict:
         """One-click professional mix pipeline. Applies volume staging, pan, EQ, compression, reverb buses, and sidechain.
 

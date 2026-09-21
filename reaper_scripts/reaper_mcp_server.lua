@@ -1383,20 +1383,75 @@ function project.project_export_audio(p)
   }
 end
 
+local MAX_UNDO_STEPS = 100
+
+-- Undo `steps` steps (default 1), most recent first, stopping early if the
+-- undo history runs out. `undone` is the most recent step, as before.
 function project.project_undo(p)
-  local action = reaper.Undo_CanUndo2(0) or ""
-  reaper.Main_OnCommand(40029, 0)
-  local next_undo = reaper.Undo_CanUndo2(0) or ""
-  local next_redo = reaper.Undo_CanRedo2(0) or ""
-  return {undone = action, next_undo = next_undo, next_redo = next_redo}
+  local steps = math.floor(tonumber(p.steps) or 1)
+  if steps < 1 or steps > MAX_UNDO_STEPS then
+    return nil, "steps must be between 1 and " .. MAX_UNDO_STEPS
+  end
+  local undone = {}
+  for _ = 1, steps do
+    local name = reaper.Undo_CanUndo2(0) or ""
+    if name == "" then break end
+    reaper.Main_OnCommand(40029, 0)
+    undone[#undone + 1] = name
+  end
+  return {
+    undone = undone[1] or "",
+    undone_steps = undone,
+    steps_undone = #undone,
+    next_undo = reaper.Undo_CanUndo2(0) or "",
+    next_redo = reaper.Undo_CanRedo2(0) or "",
+  }
 end
 
 function project.project_redo(p)
-  local action = reaper.Undo_CanRedo2(0) or ""
-  reaper.Main_OnCommand(40030, 0)
-  local next_undo = reaper.Undo_CanUndo2(0) or ""
-  local next_redo = reaper.Undo_CanRedo2(0) or ""
-  return {redone = action, next_undo = next_undo, next_redo = next_redo}
+  local steps = math.floor(tonumber(p.steps) or 1)
+  if steps < 1 or steps > MAX_UNDO_STEPS then
+    return nil, "steps must be between 1 and " .. MAX_UNDO_STEPS
+  end
+  local redone = {}
+  for _ = 1, steps do
+    local name = reaper.Undo_CanRedo2(0) or ""
+    if name == "" then break end
+    reaper.Main_OnCommand(40030, 0)
+    redone[#redone + 1] = name
+  end
+  return {
+    redone = redone[1] or "",
+    redone_steps = redone,
+    steps_redone = #redone,
+    next_undo = reaper.Undo_CanUndo2(0) or "",
+    next_redo = reaper.Undo_CanRedo2(0) or "",
+  }
+end
+
+-- Undo every step of the most recent multi-command tool run. Its steps are
+-- named "MCP: <tool>#<run> > <command>"; this undoes consecutive steps from
+-- the top of the history while they carry that same tool and run number.
+function project.project_undo_group(p)
+  local top = reaper.Undo_CanUndo2(0) or ""
+  local prefix = top:match("^(MCP: .-#%d+ > )")
+  if not prefix then
+    return nil, "The last undo step was not made by a multi-command tool. Use project_undo instead."
+  end
+  local undone = {}
+  while #undone < MAX_UNDO_STEPS do
+    local name = reaper.Undo_CanUndo2(0) or ""
+    if name:sub(1, #prefix) ~= prefix then break end
+    reaper.Main_OnCommand(40029, 0)
+    undone[#undone + 1] = name
+  end
+  return {
+    group = prefix:match("^MCP: (.-)#"),
+    undone_steps = undone,
+    steps_undone = #undone,
+    next_undo = reaper.Undo_CanUndo2(0) or "",
+    next_redo = reaper.Undo_CanRedo2(0) or "",
+  }
 end
 
 function project.project_get_notes(p)
@@ -5530,50 +5585,374 @@ for k, v in pairs(script) do handlers[k] = v end
 -- passes every argument and return value straight through. ReaScript gives
 -- each script its own Lua state, so this touches no other script.
 local function install_block_guard(api)
-  local state = {ui_depth = 0, undo_open = 0}
+  local state = {
+    ui_depth = 0, undo_open = 0, committed = false, run = nil, run_seq = 0,
+    suppress = false, last_description = nil,
+  }
   local real_prevent = api.PreventUIRefresh
   local real_begin = api.Undo_BeginBlock
   local real_end = api.Undo_EndBlock
+
+  -- While a multi-command tool is running (see group below), each undo step
+  -- it makes is named "MCP: <tool>#<run> > <command>", so its steps can be
+  -- told apart from anything else and undone together or one by one.
+  local function label(description)
+    if not state.run then return description end
+    local body = tostring(description or ""):gsub("^MCP: ", "")
+    return "MCP: " .. state.run.name .. "#" .. state.run.id .. " > " .. body
+  end
 
   api.PreventUIRefresh = function(n)
     state.ui_depth = state.ui_depth + n
     return real_prevent(n)
   end
+
+  -- REAPER's undo blocks (BeginBlock/EndBlock) do not capture changes to
+  -- MIDI items, notes and takes when called from this bridge: the step they
+  -- leave is empty or missing, so undoing it restores nothing. Commands whose
+  -- step the dispatcher records itself (see UNDO_POINT_COMMANDS) therefore run
+  -- with `suppress` set: their blocks stay out of REAPER, and the step name a
+  -- handler asked for is kept so the dispatcher can use it.
   api.Undo_BeginBlock = function()
     state.undo_open = state.undo_open + 1
+    if state.suppress then return end
     return real_begin()
   end
   api.Undo_EndBlock = function(description, flags)
     -- Handlers also close early on error paths, so never go below zero.
     if state.undo_open > 0 then state.undo_open = state.undo_open - 1 end
-    return real_end(description, flags)
+    if state.suppress then
+      state.last_description = description
+      return
+    end
+    state.committed = true
+    return real_end(label(description), flags)
   end
 
-  -- Close anything the last command left open. Returns how much it closed.
-  return function()
-    local unwound = {ui = 0, undo = 0}
+  -- Close anything the last command left open. Returns how much it closed,
+  -- and whether the command ended an undo block (its own, or one closed
+  -- here) so the dispatcher knows an undo point already exists for it.
+  local function unwind()
+    local unwound = {ui = 0, undo = 0, committed = false}
     if state.ui_depth > 0 then
       unwound.ui = state.ui_depth
       real_prevent(-state.ui_depth)
     end
     while state.undo_open > 0 do
       -- Ending the block (rather than discarding it) records the partial
-      -- work as one undo point, so the user can still undo it.
-      real_end("MCP: aborted (unbalanced undo block)", -1)
+      -- work as one undo point, so the user can still undo it. A recorded
+      -- command's blocks never reached REAPER, so there is nothing to close.
+      if not state.suppress then
+        real_end(label("MCP: aborted (unbalanced undo block)"), -1)
+        unwound.undo = unwound.undo + 1
+      end
       state.undo_open = state.undo_open - 1
-      unwound.undo = unwound.undo + 1
     end
+    unwound.committed = state.committed or unwound.undo > 0
     state.ui_depth = 0
     state.undo_open = 0
+    state.committed = false
     return unwound
   end
+
+  -- Undo groups. A tool that runs several commands opens a group, and every
+  -- undo step made while it is open is labelled with the tool and a run
+  -- number. Nothing is held open in REAPER: each command still records its
+  -- own step, so any number of them can be undone (project_undo steps=N), or
+  -- the whole run at once (project_undo_group). Groups nest: an inner tool
+  -- joins the outer run.
+  local group = {}
+
+  -- Returns the run number.
+  function group.begin(name, now)
+    if state.run then
+      state.run.depth = state.run.depth + 1
+    else
+      state.run_seq = state.run_seq + 1
+      state.run = {name = name, id = state.run_seq, depth = 1}
+    end
+    state.run.touched = now or 0
+    return state.run.id
+  end
+
+  -- Returns true only when this call closed the outermost group.
+  function group.finish()
+    if not state.run then return false end
+    state.run.depth = state.run.depth - 1
+    if state.run.depth > 0 then return false end
+    state.run = nil
+    return true
+  end
+
+  function group.is_open() return state.run ~= nil end
+
+  function group.label(description) return label(description) end
+
+  function group.touch(now)
+    if state.run then state.run.touched = now end
+  end
+
+  -- Failsafe: if the caller never closes its group (the Python process
+  -- died), stop labelling after `idle` seconds without a command, so
+  -- unrelated steps don't get attributed to a run that ended long ago.
+  -- Returns the name of the group it dropped, or nil.
+  function group.expire(now, idle)
+    if state.run and now - state.run.touched > idle then
+      local name = state.run.name
+      state.run = nil
+      return name
+    end
+    return nil
+  end
+
+  -- Per-command controls, used by the dispatcher around each command.
+  local commands = {}
+
+  -- Start a command. `suppress` is true for a command whose undo step the
+  -- dispatcher records itself; its own blocks then stay out of REAPER.
+  function commands.enter(suppress)
+    state.suppress = suppress and true or false
+    state.last_description = nil
+  end
+
+  -- The step name the last block in this command asked for, or nil.
+  function commands.description() return state.last_description end
+
+  return unwind, group, commands
 end
 
-local unwind_open_blocks = install_block_guard(reaper)
+local unwind_open_blocks, undo_group, undo_commands = install_block_guard(reaper)
+local UNDO_GROUP_IDLE_SECONDS = 60
+
+-- ============================================================
+-- Undo points for simple edits
+-- ============================================================
+
+-- Batch and structural handlers wrap their work in their own undo block, so
+-- one Ctrl+Z reverses the whole call. Simple edits (a fader, a pan, a plugin
+-- bypass, a send, a marker...) never did, so REAPER's undo skipped over them
+-- and rolled back an earlier step instead. Commands listed here get one named
+-- undo point ("MCP: <command>") recorded after they succeed, unless they
+-- ended a block of their own.
+--
+-- Every handler that changes REAPER state and has no undo block of its own
+-- must appear in exactly one of the two tables below; a test fails when a new
+-- one is added without a decision.
+local UNDO_POINT_COMMANDS = {
+  compose_ensure_tracks = true,
+  envelope_add_points = true,
+  envelope_clear_range = true,
+  fx_add = true,
+  fx_disable = true,
+  fx_enable = true,
+  fx_move = true,
+  fx_navigate_preset = true,
+  fx_rename = true,
+  fx_set_param = true,
+  fx_set_param_by_name = true,
+  fx_set_preset = true,
+  item_delete = true,
+  item_insert_media = true,
+  item_move = true,
+  item_move_to_track = true,
+  item_set_fade = true,
+  item_set_length = true,
+  item_set_mute = true,
+  item_set_volume = true,
+  item_split = true,
+  item_take_add = true,
+  item_take_delete_active = true,
+  item_take_set_active = true,
+  marker_add = true,
+  marker_add_region = true,
+  marker_delete = true,
+  marker_edit = true,
+  midi_humanize = true,
+  midi_quantize = true,
+  midi_set_item_extents = true,
+  midi_sort = true,
+  project_set_metadata = true,
+  project_set_notes_info = true,
+  send_create = true,
+  send_remove = true,
+  send_set_midi_channel = true,
+  send_set_mute = true,
+  send_set_pan = true,
+  send_set_volume = true,
+  tempo_add_marker = true,
+  tempo_clear_all = true,
+  tempo_delete_marker = true,
+  track_rename = true,
+  track_set_color = true,
+  track_set_folder = true,
+  track_set_input = true,
+  track_set_mute = true,
+  track_set_pan = true,
+  track_set_record_arm = true,
+  track_set_solo = true,
+  track_set_state_chunk = true,
+  track_set_volume = true,
+  transport_set_bpm = true,
+  transport_set_time_signature = true,
+  -- Item, MIDI and take edits. They wrap their work in undo blocks, which
+  -- REAPER doesn't capture for this data, so the dispatcher records their
+  -- step instead and keeps the blocks out of REAPER (see install_block_guard).
+  chops_create_virtual_slice = true,
+  compose_arrangement = true,
+  compose_single_track = true,
+  edit_section = true,
+  item_clone_to_position = true,
+  item_create_midi = true,
+  item_duplicate = true,
+  item_split_at_positions = true,
+  items_apply = true,
+  midi_delete_all_notes = true,
+  midi_delete_cc = true,
+  midi_delete_note = true,
+  midi_insert_cc = true,
+  midi_insert_note = true,
+  midi_insert_notes_batch = true,
+  midi_insert_program_change = true,
+  midi_set_note = true,
+  take_set_pitch = true,
+  take_set_playrate = true,
+  wipe_all_midi = true,
+}
+
+-- Deliberately not given an undo point, with the reason.
+local UNDO_EXEMPT_COMMANDS = {
+  analyze_score = "read-only analysis of the project",
+  fx_scan_params = "restores every parameter value it writes while scanning",
+  item_select = "selection only, not project content",
+  item_take_list = "read-only listing of takes",
+  midi_select_notes = "selection only, not project content",
+  project_backup = "saves a copy to disk, changes nothing in the project",
+  project_export_audio = "renders to a file, changes nothing in the project",
+  project_get_metadata = "read-only",
+  project_get_notes_info = "read-only",
+  project_main_action = "runs a REAPER action, which records its own undo point",
+  project_new = "replaces the whole project",
+  project_open = "replaces the whole project",
+  project_redo = "recording a point after a redo would erase the redo stack",
+  project_save = "file operation, changes nothing in the project",
+  project_save_as = "file operation, changes nothing in the project",
+  project_set_grid = "editing preference, not project content",
+  project_set_ripple_mode = "editing preference, not project content",
+  project_undo = "recording a point after an undo would erase the redo stack",
+  script_run_start = "runs a user script that manages its own undo",
+  selection_deselect_all_tracks = "selection only, not project content",
+  selection_select_all_tracks = "selection only, not project content",
+  track_freeze = "a REAPER action that records its own undo point",
+  track_select = "selection only, not project content",
+  track_unfreeze = "a REAPER action that records its own undo point",
+  transport_pause = "playback state, not project content",
+  transport_play = "playback state, not project content",
+  transport_record = "playback state, not project content",
+  transport_set_playrate = "playback state, not project content",
+  transport_set_position = "playback state, not project content",
+  transport_stop = "playback state, not project content",
+  transport_toggle_metronome = "playback state, not project content",
+  transport_toggle_repeat = "playback state, not project content",
+  project_undo_group = "recording a point after an undo would erase the redo stack",
+  undo_group_begin = "only labels the steps that follow, changes nothing in the project",
+  undo_group_end = "only stops labelling steps, changes nothing in the project",
+}
+
+-- Whether the dispatcher should record an undo point for a finished command.
+-- A failed command gets none: an undo step that undoes nothing is worse than
+-- no step at all. `committed` means the command already ended a block of its
+-- own, so an undo point exists.
+local function should_record_undo_point(command, ok, result, err, committed)
+  if committed or not ok or err or not result then return false end
+  return UNDO_POINT_COMMANDS[command] == true
+end
+
+-- Undo groups. A tool that runs several commands wraps them in a group so
+-- the undo steps it makes are labelled "MCP: <tool>#<run> > <command>". Each
+-- command still records its own step; see install_block_guard.
+local undo_group_commands = {}
+
+function undo_group_commands.undo_group_begin(p)
+  local name = tostring(p.name or "group")
+  if #name > 100 then name = name:sub(1, 100) end
+  local run = undo_group.begin(name, reaper.time_precise())
+  return {success = true, group = name, run = run}
+end
+
+function undo_group_commands.undo_group_end(p)
+  return {success = true, closed = undo_group.finish()}
+end
+
+for name, handler in pairs(undo_group_commands) do handlers[name] = handler end
 
 -- ============================================================
 -- Main loop
 -- ============================================================
+
+-- Record one named undo step. REAPER's state-change calls each capture what
+-- the other misses when used from this bridge: Undo_OnStateChange2 captures
+-- items, MIDI and takes, and the flagged Undo_OnStateChangeEx2 captures
+-- everything else (track, FX, send, marker, tempo...). Calling both for one
+-- command can record an item change twice, because REAPER syncs item state
+-- lazily: a tool that sent commands back to back sometimes left two identical
+-- steps. So each command uses exactly one call, chosen by what it changes. A
+-- test checks that every command that touches items, MIDI or takes is listed.
+local UNDO_ITEM_COMMANDS = {
+  chops_create_virtual_slice = true,
+  compose_arrangement = true,
+  compose_single_track = true,
+  edit_section = true,
+  item_clone_to_position = true,
+  item_create_midi = true,
+  item_delete = true,
+  item_duplicate = true,
+  item_insert_media = true,
+  item_move = true,
+  item_move_to_track = true,
+  item_set_fade = true,
+  item_set_length = true,
+  item_set_mute = true,
+  item_set_volume = true,
+  item_split = true,
+  item_split_at_positions = true,
+  item_take_add = true,
+  item_take_delete_active = true,
+  item_take_set_active = true,
+  items_apply = true,
+  midi_delete_all_notes = true,
+  midi_delete_cc = true,
+  midi_delete_note = true,
+  midi_humanize = true,
+  midi_insert_cc = true,
+  midi_insert_note = true,
+  midi_insert_notes_batch = true,
+  midi_insert_program_change = true,
+  midi_quantize = true,
+  midi_set_item_extents = true,
+  midi_set_note = true,
+  midi_sort = true,
+  take_set_pitch = true,
+  take_set_playrate = true,
+  wipe_all_midi = true,
+}
+
+-- Replaces a whole track's state, which includes the items on it, so it needs
+-- both kinds of capture. It is rarely used, so the small chance of a repeated
+-- step is accepted here rather than risk a step that restores nothing.
+local UNDO_BOTH_CALLS_COMMANDS = {
+  track_set_state_chunk = true,
+}
+
+local function record_undo_step(command, name)
+  if UNDO_ITEM_COMMANDS[command] then
+    reaper.Undo_OnStateChange2(0, name)
+  elseif UNDO_BOTH_CALLS_COMMANDS[command] then
+    reaper.Undo_OnStateChange2(0, name)
+    reaper.Undo_OnStateChangeEx2(0, name, -1, -1)
+  else
+    reaper.Undo_OnStateChangeEx2(0, name, -1, -1)
+  end
+end
 
 local function process_command()
   local f = io.open(command_file, "r")
@@ -5608,16 +5987,29 @@ local function process_command()
     return
   end
 
+  -- A command whose undo step is recorded below keeps its own undo blocks out
+  -- of REAPER (see install_block_guard), so it can't leave an empty step.
+  undo_commands.enter(UNDO_POINT_COMMANDS[cmd.command] == true)
   local ok, result, err = pcall(handler, cmd.params or {})
 
   -- Before any response is written, whatever the outcome: close a UI
   -- refresh hold or undo block the command left open.
   local unwound = unwind_open_blocks()
+  local step_name = undo_commands.description() or ("MCP: " .. cmd.command)
+  undo_commands.enter(false)
   if unwound.ui > 0 or unwound.undo > 0 then
     reaper.ShowConsoleMsg(string.format(
       "ReaperMCP: '%s' left %d UI refresh hold(s) and %d undo block(s) open; closed them.\n",
       tostring(cmd.command), unwound.ui, unwound.undo))
     reaper.UpdateArrange()
+  end
+
+  -- A command inside an undo group keeps the group alive, and its undo
+  -- step is labelled with the tool that ran it.
+  undo_group.touch(reaper.time_precise())
+  if should_record_undo_point(cmd.command, ok, result, err, unwound.committed) then
+    -- Best effort: failing to record an undo point must never fail the command.
+    pcall(record_undo_step, cmd.command, undo_group.label(step_name))
   end
 
   if not ok then
@@ -5640,6 +6032,11 @@ end
 local function main_loop()
   if not running then return end
   update_heartbeat()
+  -- Failsafe: stop labelling steps for an undo group its caller never closed.
+  local expired = undo_group.expire(reaper.time_precise(), UNDO_GROUP_IDLE_SECONDS)
+  if expired then
+    reaper.ShowConsoleMsg("ReaperMCP: undo group '" .. expired .. "' was never closed; stopped labelling.\n")
+  end
   process_command()
   reaper.defer(main_loop)
 end

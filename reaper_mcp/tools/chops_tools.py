@@ -27,6 +27,7 @@ import random
 import re
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 
@@ -631,6 +632,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "chop_pipeline")
     async def chop_pipeline(
         vocal_item_index: int,
         chord_progression: str = "",
@@ -1027,6 +1029,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "stack_chop_layers")
     async def stack_chop_layers(
         item_indices: str,
         intervals_semitones: str = "[7, 12]",

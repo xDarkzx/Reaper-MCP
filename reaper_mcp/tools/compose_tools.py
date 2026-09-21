@@ -15,6 +15,7 @@ import time
 import glob as _glob
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.constants import (
     MAX_COMPOSE_TRACKS, MAX_NOTES_PER_TRACK, MAX_TOTAL_NOTES_PER_CALL,
@@ -82,6 +83,7 @@ def register(mcp: FastMCP):
         return result
 
     @mcp.tool()
+    @undo_grouped(client, "compose_arrangement")
     async def compose_arrangement(tracks: str, clear_existing: bool = False) -> dict:
         """Batch-insert MIDI from shorthand or JSON — guarded for small edits only.
 

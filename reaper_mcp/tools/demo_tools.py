@@ -11,6 +11,7 @@ import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
+    @undo_grouped(client, "demo_edm_project")
     async def demo_edm_project(clean_first: bool = True, bpm: float = 140.0) -> dict:
         """Scaffold a minimal EDM test project with 7 tracks, ReaSynth on each, and 8 bars of MIDI.
 

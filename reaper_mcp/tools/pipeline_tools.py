@@ -14,6 +14,7 @@ import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.mix_engine.plugins import get_plugin_profile
 
     @mcp.tool()
+    @undo_grouped(client, "setup_parallel_compression")
     async def setup_parallel_compression(
         source_tracks: str,
         bus_name: str = "BUS: Parallel Comp",
@@ -112,6 +114,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "setup_drum_bus")
     async def setup_drum_bus(
         source_tracks: str,
         bus_name: str = "BUS: Drums",
@@ -173,6 +176,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "setup_vocal_chain")
     async def setup_vocal_chain(
         track_index: int,
         hp_freq: float = 100.0,

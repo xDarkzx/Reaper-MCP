@@ -14,6 +14,7 @@ import json
 import re
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 
 
@@ -150,6 +151,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
+    @undo_grouped(client, "create_drum_pattern")
     async def create_drum_pattern(
         track_index: int,
         pattern: str,
@@ -302,6 +304,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "create_chord_progression")
     async def create_chord_progression(
         track_index: int,
         chords: str,

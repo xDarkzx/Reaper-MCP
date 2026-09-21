@@ -24,6 +24,7 @@ from collections import Counter
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.path_safety import (
     is_excluded_file_name,
@@ -593,6 +594,7 @@ def register(mcp: FastMCP):
         }
 
     @mcp.tool()
+    @undo_grouped(client, "load_loops")
     async def load_loops(loops: str, project_bpm: float = 0.0) -> dict:
         """Batch-load audio loops into REAPER, auto-creating tracks by name.
 

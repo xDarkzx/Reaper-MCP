@@ -27,6 +27,9 @@ the first place.
 - It deletes MIDI items (audio items are left untouched), clears markers/regions, and resets composition state in one call.
 - NEVER manually delete items with `item_delete`, `midi_delete_all_notes`, or loops of individual track operations.
 - To delete tracks, make ONE `track_delete_batch` call — `[{"all": true}]` for every track, `[{"track_index": 3}]` for one, `[{"track_indices": [0, 2, 5]}]` for several — never a loop of single deletes. It can't delete the master track. Confirm first on a project that already has content.
+
+## Undoing a mistake
+Every change you make is a named undo step, so a mistake can be taken back. `project_undo` reverses the last step, `project_undo(steps=3)` the last three. A tool that runs many commands (`engine_mix`, `chop_pipeline`...) leaves one step per command, labelled with the tool, and `project_undo_group` takes back everything that run did. Offer this when the user says a result sounds wrong, instead of rebuilding by hand.
 - NEVER use `edit_section` with empty tracks to "clear" — use `wipe_all_midi`.
 - For partial wipe: `wipe_all_midi(tracks="[0,1,2]")` — pass specific track indices.
 

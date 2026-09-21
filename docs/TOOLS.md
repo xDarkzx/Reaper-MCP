@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for every MCP tool exposed by ReaperMCP — **180 tools across 27 modules**. Grouped by domain; each tool links to its source module.
+Complete reference for every MCP tool exposed by ReaperMCP — **181 tools across 26 modules**. Grouped by domain; each tool links to its source module.
 
 > All tools are async. Numeric inputs are range-validated before being sent to REAPER. Track/item indices are 0-based.
 
@@ -12,12 +12,12 @@ Set `REAPER_MCP_PROFILE=<name>` in your MCP client's server config to register o
 
 | Profile | Modules | Exact Tools | Instruction Chars | Use when |
 |---------|--------:|------------:|------------------:|----------|
-| `full` | 27 | 180 | ~14.5k | Default. You're on Claude / GPT-4 / Gemini-class models. |
-| `composition` | 17 | 137 | ~8.0k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
-| `production` | 18 | 143 | ~11.4k | MIDI instruments, stem bouncing, FX chains (`setup_fx_chain`/`setup_effect_bus`), and mixing. Also gets `compose_tools` (`get_track_instruments`/`analyze_score`/`compose_arrangement`) — previously missing despite loading the composition instructions. Drops arrangement helpers (patterns/chops). |
-| `mixing` | 12 | 84 | ~9.1k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
-| `analysis` | 6 | 61 | ~4.2k | Inspect and measure only. Read-mostly workflow. |
-| `minimal` | 4 | 51 | ~2.0k | Smoke test / basic control surface. |
+| `full` | 26 | 181 | ~14.9k | Default. You're on Claude / GPT-4 / Gemini-class models. |
+| `composition` | 17 | 138 | ~8.4k | Writing or editing music (incl. patterns, loops, vocal chops, batch item/marker edits, ReaScript). Drops FX, mix, sidechain, analysis. |
+| `production` | 18 | 144 | ~11.8k | MIDI instruments, stem bouncing, FX chains (`setup_fx_chain`/`setup_effect_bus`), and mixing. Also gets `compose_tools` (`get_track_instruments`/`analyze_score`/`compose_arrangement`) — previously missing despite loading the composition instructions. Drops arrangement helpers (patterns/chops). |
+| `mixing` | 12 | 84 | ~9.5k | Mixing / mastering / bus pipelines, including batch FX setup (`setup_fx_chain`/`setup_effect_bus`). Drops MIDI / most composition. |
+| `analysis` | 6 | 62 | ~4.6k | Inspect and measure only. Read-mostly workflow. |
+| `minimal` | 4 | 52 | ~2.4k | Smoke test / basic control surface. |
 
 Audio-library search (`scan_audio_folder`, `list_audio_subfolders`, `detect_common_bpm`, `load_loops` — the `loops_tools` module) is available in every profile, since finding and importing audio files isn't specific to any one workflow.
 
@@ -174,8 +174,9 @@ Project lifecycle, save/load, rendering, undo. Source: `project_tools.py`.
 | `project_save()` | Save the current project. |
 | `project_save_as(path)` | Save the project to a new path. |
 | `project_export_audio(path, format="wav")` | Render the project to audio. Supported formats: `wav`, `mp3`, `ogg`, `flac`, `aiff`. |
-| `project_undo()` | Undo the last action. |
-| `project_redo()` | Redo the last undone action. |
+| `project_undo(steps=1)` | Undo the last step, or the last `steps` (1-100) in one call, and report every step undone. Every change made through these tools is one named undo step (`MCP: <tool>`), and a batch call is one step for the whole call. |
+| `project_redo(steps=1)` | Redo the last undone step, or the last `steps` (1-100) in one call. |
+| `project_undo_group()` | Undo every step of the most recent multi-command tool run (say, everything `engine_mix` just did). Steps of such a run are named `MCP: <tool>#<run> > <command>`; it stops at the first step from anything else, and refuses when the last step wasn't from such a run. |
 | `project_get_notes()` | Get the project's notes field (free-text area). |
 | `project_set_notes(notes)` | Replace the project's notes field. |
 | `project_get_metadata()` | Get project render metadata (title, author, album, genre, etc.) — the fields embedded into rendered file tags (ID3/Vorbis/APE) and render-filename templates. Values are write-only in REAPER's API; returns which fields are set, not their values. |

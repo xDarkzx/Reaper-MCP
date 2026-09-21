@@ -6,6 +6,17 @@ from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.constants import ALLOWED_EXPORT_FORMATS
 from reaper_mcp_shared.path_safety import safe_path as _safe_path
 
+# Most steps one undo/redo call may take. Matches MAX_UNDO_STEPS in the Lua.
+_MAX_UNDO_STEPS = 100
+
+
+def _check_undo_steps(steps) -> None:
+    if not isinstance(steps, int) or isinstance(steps, bool) or not 1 <= steps <= _MAX_UNDO_STEPS:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            f"steps must be a whole number between 1 and {_MAX_UNDO_STEPS}",
+        )
+
 # REAPER's RENDER_FORMAT project-info string takes a 4-byte format tag, not
 # a plain extension — and confirmed empirically against a live REAPER
 # instance (an "invalid format" error on the forward form) that the tag
@@ -229,14 +240,44 @@ def register(mcp: FastMCP):
         )
 
     @mcp.tool()
-    async def project_undo() -> dict:
-        """Undo last action."""
-        return await client.execute("project_undo")
+    async def project_undo(steps: int = 1) -> dict:
+        """Undo the last step, or the last several steps in one call.
+
+        Every change made through these tools is its own named undo step
+        ("MCP: <tool>"), and a batch call is one step. A tool that runs many
+        commands, like engine_mix, leaves one step per command, labelled
+        "MCP: <tool>#<run> > <command>". Undo just the last 2 or 3 of them
+        with `steps`, or use project_undo_group to undo the whole run.
+
+        Args:
+            steps: How many steps to undo, 1-100 (default 1). Stops early if
+                   the undo history runs out. The response lists every step
+                   undone, most recent first.
+        """
+        _check_undo_steps(steps)
+        return await client.execute("project_undo", steps=steps)
 
     @mcp.tool()
-    async def project_redo() -> dict:
-        """Redo last undone action."""
-        return await client.execute("project_redo")
+    async def project_undo_group() -> dict:
+        """Undo every step of the most recent multi-command tool run.
+
+        Use it to take back everything a tool like engine_mix or chop_pipeline
+        just did, without counting its steps. It only works when the last undo
+        step came from such a run (its name looks like "MCP: engine_mix#7 >
+        setup_fx_chain"); otherwise it changes nothing and says to use
+        project_undo. Steps from earlier runs are left alone.
+        """
+        return await client.execute("project_undo_group")
+
+    @mcp.tool()
+    async def project_redo(steps: int = 1) -> dict:
+        """Redo the last undone step, or the last several in one call.
+
+        Args:
+            steps: How many steps to redo, 1-100 (default 1).
+        """
+        _check_undo_steps(steps)
+        return await client.execute("project_redo", steps=steps)
 
     @mcp.tool()
     async def project_get_notes() -> dict:

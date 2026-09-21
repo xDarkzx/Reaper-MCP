@@ -6,6 +6,7 @@ import math
 import re
 
 from mcp.server.fastmcp import FastMCP
+from reaper_mcp.undo_group import undo_grouped
 from reaper_mcp_shared.error_codes import ReaperMCPError, ErrorCode
 from reaper_mcp_shared.constants import MAX_COMPOSE_TRACKS
 from reaper_mcp.safety import ensure_backup
@@ -192,6 +193,7 @@ def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
     @mcp.tool()
+    @undo_grouped(client, "wipe_all_midi")
     async def wipe_all_midi(tracks: str = "") -> dict:
         """Wipe all MIDI items and reset composition state. Tracks can compose again after.
 
