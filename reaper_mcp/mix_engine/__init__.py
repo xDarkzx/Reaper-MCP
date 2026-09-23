@@ -15,8 +15,8 @@ Auto-detects FabFilter Pro-Q 3 / Pro-C 2 / Pro-R; falls back to REAPER stock
 import json
 import logging
 
-from reaper_mcp.mix_engine.detect import detect_plugins
-from reaper_mcp.mix_engine.plugins import get_plugin_profile
+from reaper_mcp.mix_engine.plugins import get_plugin_profile_for
+from reaper_mcp.mix_engine.selection import select_plugins
 from reaper_mcp.mix_engine.profiles import (
     VOLUME_STAGING, EQ_PROFILES, COMPRESSION_PROFILES, REVERB_BUSES,
     INSTRUMENT_FAMILIES, SEND_ROUTING,
@@ -79,23 +79,23 @@ async def run_mix_pipeline(
 
     v2_profile = get_v2_profile(style) if style else None
 
-    suite = await detect_plugins(client)
-    plugin_profile = get_plugin_profile(suite)
-    logger.info("Mix engine using plugin suite: %s", suite.value)
+    selection = await select_plugins(client)
+    plugin_profile = get_plugin_profile_for(selection)
+    logger.info("Mix engine plugin families: %s", selection.summary()["plugin_families"])
 
     if v2_profile is not None:
         logger.info("Mix path: v2 catalog (%s / family=%s)", v2_profile.name, v2_profile.family)
-        return await _run_v2_pipeline(client, v2_profile, plugin_profile, suite, clean)
+        return await _run_v2_pipeline(client, v2_profile, plugin_profile, selection, clean)
 
     logger.info("Mix path: legacy orchestral (style=%r)", style)
-    return await _run_legacy_pipeline(client, track_map, plugin_profile, suite, clean)
+    return await _run_legacy_pipeline(client, track_map, plugin_profile, selection, clean)
 
 
 # ════════════════════════════════════════════════════════════════════
 #  v2 PATH — catalog-driven, role-based, sidechain-aware
 # ════════════════════════════════════════════════════════════════════
 
-async def _run_v2_pipeline(client, profile, plugin_profile, suite, clean):
+async def _run_v2_pipeline(client, profile, plugin_profile, selection, clean):
     from reaper_mcp.mix_engine.profiles_v2 import resolve_roles
 
     # 1. Get live tracks with names
@@ -152,7 +152,7 @@ async def _run_v2_pipeline(client, profile, plugin_profile, suite, clean):
         "path": "v2_catalog",
         "style": profile.name,
         "family": profile.family,
-        "plugin_suite": suite.value,
+        **selection.summary(),
         "tracks_matched": len(role_map),
         "role_map": {ti: role for ti, role in sorted(role_map.items())},
         "unmatched_tracks": unmatched,
@@ -333,7 +333,7 @@ async def _v2_apply_sidechains(client, profile, role_map) -> int:
 #  LEGACY PATH — dict-based, orchestral, unchanged behavior
 # ════════════════════════════════════════════════════════════════════
 
-async def _run_legacy_pipeline(client, track_map, plugin_profile, suite, clean):
+async def _run_legacy_pipeline(client, track_map, plugin_profile, selection, clean):
     if clean:
         await _clean_mix_fx(client, track_map, plugin_profile)
 
@@ -346,7 +346,7 @@ async def _run_legacy_pipeline(client, track_map, plugin_profile, suite, clean):
     return {
         "success": True,
         "path": "legacy_orchestral",
-        "plugin_suite": suite.value,
+        **selection.summary(),
         "volume_staged": vol_applied,
         "eq_applied": eq_applied,
         "compression_applied": comp_applied,

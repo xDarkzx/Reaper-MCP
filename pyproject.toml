@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xdarkzx-reaper-mcp"
-version = "0.8.1"
+version = "0.8.2"
 description = "MCP server for AI-driven music production in REAPER via file-based IPC with a Lua bridge"
 license = "Apache-2.0"
 authors = [
@@ -64,6 +64,7 @@ packages = ["reaper_mcp", "reaper_mcp_shared"]
 
 [project.scripts]
 reaper-mcp = "reaper_mcp.main:main"
+xdarkzx-reaper-mcp = "reaper_mcp.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

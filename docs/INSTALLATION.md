@@ -31,7 +31,7 @@ pip install -e .
 
 This gives you the `reaper-mcp` command.
 
-### Option D: pip install from PyPI
+### Option C: pip install from PyPI
 
 ```bash
 pip install xdarkzx-reaper-mcp
@@ -41,7 +41,7 @@ Also gives you the `reaper-mcp` command, without needing to install from a
 local checkout — but you still need `reaper_scripts/reaper_mcp_server.lua`
 from the repo (clone it, or just download that one file) for Step 2 below.
 
-### Option C: Run directly (no install)
+### Option D: Run directly (no install)
 
 ```bash
 cd Reaper-MCP
@@ -49,6 +49,18 @@ python -m reaper_mcp.main
 ```
 
 When running directly, use `python -m reaper_mcp.main` anywhere this guide says `reaper-mcp`.
+
+### Option E: uvx (zero install)
+
+If you have [uv](https://docs.astral.sh/uv/) installed, there's nothing to
+install at all — `uvx` fetches the package and runs it on demand:
+
+```bash
+uvx xdarkzx-reaper-mcp
+```
+
+You still need `reaper_scripts/reaper_mcp_server.lua` from the repo for
+Step 2 below, same as Option C.
 
 ---
 
@@ -90,7 +102,20 @@ If you installed via `pip install -e .`, `pip install xdarkzx-reaper-mcp`, or th
 }
 ```
 
-**Option B: Running from source** (no pip install)
+**Option B: uvx** (zero install — nothing to `pip install` at all)
+
+```json
+{
+  "mcpServers": {
+    "reaper": {
+      "command": "uvx",
+      "args": ["xdarkzx-reaper-mcp"]
+    }
+  }
+}
+```
+
+**Option C: Running from source** (no pip install)
 
 If you skipped `pip install` and want to run directly from the cloned repo:
 
@@ -217,7 +242,9 @@ Or create `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for g
 
 ### Other MCP Clients
 
-ReaperMCP uses **stdio transport**. Point any MCP-compatible client at the `reaper-mcp` command.
+ReaperMCP uses **stdio transport**. Point any MCP-compatible client at the
+`reaper-mcp` command, or at `uvx xdarkzx-reaper-mcp` if you'd rather not
+install anything first.
 
 ### Reducing the tool surface for smaller models
 

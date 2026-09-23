@@ -86,8 +86,14 @@ def register(mcp: FastMCP):
         """Save user FX preferences — per-category plugin overrides.
 
         Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` (Windows) or
-        `~/.reaper_mcp/fx_prefs.json` (macOS/Linux). Mix pipelines consult
-        this before auto-picking.
+        `~/.reaper_mcp/fx_prefs.json` (macOS/Linux). The mix and master
+        pipelines apply a preference for eq, compressor, reverb and limiter
+        when the engine has a parameter map for that plugin (REAPER's own
+        ReaEQ / ReaComp / ReaVerbate / ReaLimit, and FabFilter Pro-Q 3 /
+        Pro-C 2 / Pro-R / Pro-L 2). The response's `engine_support` says which
+        of your preferences the engine can use; for any it can't, the engine
+        uses the best supported plugin for that category and reports it in
+        the mix result's `preferences_ignored`.
 
         Args:
             preferences: JSON object mapping categories to plugin names, e.g.
@@ -115,10 +121,14 @@ def register(mcp: FastMCP):
         if unknown:
             logger.info("Ignoring unknown FX preference keys: %s", unknown)
 
+        from reaper_mcp.mix_engine.selection import describe_preference_support
+
         path = save_user_fx_preferences(prefs)
+        saved = {k: v for k, v in prefs.items() if k in CATEGORY_RANKINGS}
         return {
             "success": True,
             "path": path,
-            "saved": {k: v for k, v in prefs.items() if k in CATEGORY_RANKINGS},
+            "saved": saved,
             "ignored": unknown,
+            "engine_support": describe_preference_support(saved),
         }

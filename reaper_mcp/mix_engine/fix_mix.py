@@ -14,8 +14,8 @@ for a real mix, but a useful starting point or emergency clean-up.
 import json
 import logging
 
-from reaper_mcp.mix_engine.detect import detect_plugins
-from reaper_mcp.mix_engine.plugins import get_plugin_profile
+from reaper_mcp.mix_engine.plugins import get_plugin_profile_for
+from reaper_mcp.mix_engine.selection import select_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +97,9 @@ async def run_fix_mix(client, style: str = "", include_master: bool = True) -> d
         from reaper_mcp.mix_engine.profiles_v2 import resolve_roles
         role_map = resolve_roles(style_profile, live_tracks)
 
-    # Detect plugin suite (for EQ plugin name)
-    suite = await detect_plugins(client)
-    plugin_profile = get_plugin_profile(suite)
+    # Select the plugin family per category (for the EQ plugin name)
+    selection = await select_plugins(client)
+    plugin_profile = get_plugin_profile_for(selection)
 
     # Build per-track EQ
     tracks_with_eq = []
@@ -131,11 +131,11 @@ async def run_fix_mix(client, style: str = "", include_master: bool = True) -> d
     # Apply master limiter + gentle glue comp
     master_summary = None
     if include_master:
-        master_summary = await _apply_emergency_master(client, style_profile, suite)
+        master_summary = await _apply_emergency_master(client, style_profile, selection)
 
     return {
         "success": True,
-        "plugin_suite": suite.value,
+        **selection.summary(),
         "tracks_processed": len(tracks_with_eq),
         "classifications": classifications,
         "master": master_summary,
@@ -189,7 +189,7 @@ def _build_corrective_eq(kind: str) -> dict | None:
     }
 
 
-async def _apply_emergency_master(client, style_profile, suite) -> dict:
+async def _apply_emergency_master(client, style_profile, selection) -> dict:
     """Apply a gentle master chain — glue comp + limiter."""
     from reaper_mcp.mix_engine.profiles_v2 import MasteringChain, CompProfile
     from reaper_mcp.mix_engine.master import _build_master_fx_chain
@@ -212,7 +212,7 @@ async def _apply_emergency_master(client, style_profile, suite) -> dict:
             ),
         )
 
-    fx_chain = _build_master_fx_chain(spec, suite)
+    fx_chain = _build_master_fx_chain(spec, selection)
     result = await client.execute(
         "setup_master_chain",
         fx_chain=json.dumps(fx_chain),

@@ -107,6 +107,7 @@ class ReaperStockProfile:
     eq_name = "ReaEQ"
     reverb_name = "ReaVerbate"
     compressor_name = "ReaComp"
+    limiter_name = "ReaLimit"
 
     def eq_fx_chain_entry(self, eq_profile: dict) -> dict:
         """Build an fx_chain entry for ReaEQ from an EQ profile dict.
@@ -285,6 +286,7 @@ class FabFilterProfile:
     eq_name = "FabFilter Pro-Q 3"
     reverb_name = "FabFilter Pro-R"
     compressor_name = "FabFilter Pro-C 2"
+    limiter_name = "FabFilter Pro-L 2"
 
     # Pro-Q 3 band shape values (normalized, 8 shapes mapped to 0/7..7/7)
     _SHAPE_BELL = 0.0
@@ -407,7 +409,35 @@ class FabFilterProfile:
 
 
 def get_plugin_profile(suite: PluginSuite):
-    """Return the appropriate plugin profile for the detected suite."""
+    """Return the plugin profile for one plugin family."""
     if suite == PluginSuite.FABFILTER:
         return FabFilterProfile()
     return ReaperStockProfile()
+
+
+class CompositeProfile:
+    """Builds each category's FX entry from that category's own plugin family,
+    so a preference for one category (say ReaEQ for EQ) doesn't drag the others
+    along. `selection.family(category)` says which family a category uses."""
+
+    name = "composite"
+
+    def __init__(self, selection):
+        self._selection = selection
+
+    def _for(self, category: str):
+        return get_plugin_profile(self._selection.family(category))
+
+    def eq_fx_chain_entry(self, eq_profile: dict) -> dict:
+        return self._for("eq").eq_fx_chain_entry(eq_profile)
+
+    def compression_fx_chain_entry(self, comp_profile: dict) -> dict:
+        return self._for("compressor").compression_fx_chain_entry(comp_profile)
+
+    def reverb_fx_chain_entry(self, reverb_config: dict) -> dict:
+        return self._for("reverb").reverb_fx_chain_entry(reverb_config)
+
+
+def get_plugin_profile_for(selection) -> CompositeProfile:
+    """Return the profile for a per-category `PluginSelection`."""
+    return CompositeProfile(selection)

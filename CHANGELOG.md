@@ -2,6 +2,57 @@
 
 All notable changes to ReaperMCP will be documented in this file.
 
+## [Unreleased]
+
+## [0.8.2] - 2026-09-23
+
+### Added
+
+- **`uvx xdarkzx-reaper-mcp` now works.** The PyPI package name
+  (`xdarkzx-reaper-mcp`) and the console command (`reaper-mcp`) never
+  matched, so `uvx`/`npx`-style ephemeral launchers — which assume the
+  command name equals the package name — couldn't find it (`uvx` reported
+  "An executable named `xdarkzx-reaper-mcp` is not provided by package
+  `xdarkzx-reaper-mcp`"). A second console-script entry aliases the package
+  name to the same entry point, so both `reaper-mcp` and
+  `uvx xdarkzx-reaper-mcp` work; existing `"command": "reaper-mcp"` configs
+  are unaffected. Documented as a zero-install option in `docs/INSTALLATION.md`.
+
+### Fixed
+
+- **`set_fx_preferences` had no effect on the mix and master pipelines.**
+  Saving a preference (say ReaEQ as the EQ) changed what `fx_list_installed`
+  reported, but `engine_mix`, `engine_master`, `engine_fix_mix`,
+  `setup_drum_bus`, `setup_vocal_chain` and `setup_parallel_compression`
+  chose their plugins from a single "FabFilter or stock" flag
+  (`detect_plugins`) that ignored preferences, so Pro-Q 3 was placed anyway.
+  They now choose a plugin family **per category** (eq, compressor, reverb,
+  limiter) from the inventory and the preferences, and the master chain
+  builds each stage from its own category's family. A preference for one
+  category no longer changes the others.
+- **A preference the engine can't honor is now reported, not silently
+  dropped.** The engine has parameter maps for two families, REAPER stock and
+  FabFilter (Pro-Q 3 / Pro-C 2 / Pro-R / Pro-L 2). For a preference outside
+  those, or for a plugin that isn't installed, it uses the best supported
+  plugin for that category and lists the reason under `preferences_ignored`
+  in the pipeline's result. `set_fx_preferences` now says up front which of
+  your preferences the engine can use (`engine_support`), and every pipeline
+  result carries `plugin_families`.
+- **REAPER's stock plugins are now a last resort.** For each category the
+  engine uses ReaEQ / ReaComp / ReaVerbate / ReaLimit only when no supported
+  third-party plugin (FabFilter) is installed for it, even if a saved
+  preference names the stock plugin; that preference is reported under
+  `preferences_ignored`.
+- **The docs claimed the pipelines add other brands' plugins with fuzzy
+  parameter matching.** They don't; corrected in the architecture notes and
+  the AI instructions.
+
+### Removed
+
+- **`detect_plugins`**, the single-flag "FabFilter or stock" detector,
+  superseded by the per-category selection built on the plugin inventory.
+  It was internal, not a tool, so nothing calling the MCP tools is affected.
+
 ## [0.8.1] - 2026-09-21
 
 ### Added

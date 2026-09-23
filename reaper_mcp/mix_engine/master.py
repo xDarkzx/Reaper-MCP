@@ -19,7 +19,8 @@ target LUFS by ear or meter.
 import json
 import logging
 
-from reaper_mcp.mix_engine.detect import detect_plugins, PluginSuite
+from reaper_mcp.mix_engine.detect import PluginSuite
+from reaper_mcp.mix_engine.selection import PluginSelection, select_plugins
 from reaper_mcp.mix_engine.profiles_v2 import (
     MasteringChain, CompProfile, get_profile,
 )
@@ -33,11 +34,11 @@ async def run_master_pipeline(client, style: str, clean: bool = True) -> dict:
     if profile is None:
         return {"success": False, "error": f"Unknown style '{style}'"}
 
-    suite = await detect_plugins(client)
+    selection = await select_plugins(client)
     spec = profile.mastering
 
     from reaper_mcp.mix_engine import _tag_mix_fx
-    fx_chain = [_tag_mix_fx(e) for e in _build_master_fx_chain(spec, suite)]
+    fx_chain = [_tag_mix_fx(e) for e in _build_master_fx_chain(spec, selection)]
 
     result = await client.execute(
         "setup_master_chain",
@@ -52,33 +53,37 @@ async def run_master_pipeline(client, style: str, clean: bool = True) -> dict:
         "true_peak_db": spec.true_peak_db,
         "stereo_width": spec.stereo_width,
         "limiter_character": spec.limiter_character,
-        "plugin_suite": suite.value,
+        **selection.summary(),
         "applied": result.get("data", result).get("fx_added", []),
         "cleared": result.get("data", result).get("cleared", 0),
     }
 
 
-def _build_master_fx_chain(spec: MasteringChain, suite: PluginSuite) -> list[dict]:
-    """Build the ordered FX chain for the master bus."""
-    is_ff = (suite == PluginSuite.FABFILTER)
+def _build_master_fx_chain(spec: MasteringChain, selection: PluginSelection) -> list[dict]:
+    """Build the ordered FX chain for the master bus. Each stage comes from the
+    plugin family selected for its own category (EQ, compressor, limiter), so a
+    preference for one doesn't change the others."""
+    eq_ff = selection.family("eq") == PluginSuite.FABFILTER
+    comp_ff = selection.family("compressor") == PluginSuite.FABFILTER
+    limiter_ff = selection.family("limiter") == PluginSuite.FABFILTER
     chain: list[dict] = []
 
     # ─── 1. Subtractive EQ: HP + any bus_cuts ───────────────────
-    if is_ff:
+    if eq_ff:
         chain.append(_ff_subtractive_eq(spec))
     else:
         chain.append(_rea_subtractive_eq(spec))
 
     # ─── 2. Bus glue compressor ─────────────────────────────────
     if spec.bus_comp is not None:
-        if is_ff:
+        if comp_ff:
             chain.append(_ff_bus_comp(spec.bus_comp))
         else:
             chain.append(_rea_bus_comp(spec.bus_comp))
 
     # ─── 3. Tonal shelf EQ ──────────────────────────────────────
     if spec.low_shelf_db != 0.0 or spec.high_shelf_db != 0.0:
-        if is_ff:
+        if eq_ff:
             chain.append(_ff_tonal_eq(spec))
         else:
             chain.append(_rea_tonal_eq(spec))
@@ -88,7 +93,7 @@ def _build_master_fx_chain(spec: MasteringChain, suite: PluginSuite) -> list[dic
         chain.append(_stereo_width_fx(spec.stereo_width))
 
     # ─── 5. Limiter ─────────────────────────────────────────────
-    if is_ff:
+    if limiter_ff:
         chain.append(_ff_limiter(spec))
     else:
         chain.append(_rea_limiter(spec))

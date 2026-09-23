@@ -5,8 +5,8 @@ category (EQ, compressor, reverb, limiter, de-esser, gate, saturator, etc.)
 plus a list of rack-style plugins the user has (so callers know to route
 around them since rack interiors are opaque to REAPER's FX API).
 
-Legacy: `detect_plugins()` still returns a `PluginSuite` enum for code paths
-that only care "FabFilter or stock?". New code should prefer `get_inventory()`.
+The mix and master pipelines don't use the inventory directly: they resolve a
+plugin family per category from it in `selection.py`.
 """
 
 import logging
@@ -169,19 +169,3 @@ async def get_inventory(client) -> PluginInventory:
     )
     inv.suite = PluginSuite.FABFILTER if fabby else PluginSuite.REAPER_STOCK
     return inv
-
-
-# ────────────────────────────────────────────────────────────────
-# Legacy single-suite detector (kept so existing mix pipeline works)
-# ────────────────────────────────────────────────────────────────
-
-async def detect_plugins(client) -> PluginSuite:
-    """Legacy detector — returns FABFILTER if Pro-Q 3 (or similar) is the best
-    EQ pick; REAPER_STOCK otherwise. New code should call `get_inventory`.
-    """
-    try:
-        inv = await get_inventory(client)
-        return inv.suite
-    except Exception as e:
-        logger.warning("Plugin detection failed: %s — defaulting to stock", e)
-        return PluginSuite.REAPER_STOCK

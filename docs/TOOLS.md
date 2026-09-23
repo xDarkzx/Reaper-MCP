@@ -349,7 +349,7 @@ Discover what plugins the user has installed, and pin per-category favourites. S
 | Tool | Description |
 |------|-------------|
 | `fx_list_installed(category="", full_list=False)` | Return every installed plugin plus the best-available EQ / compressor / reverb / limiter / de-esser / gate / saturator / multiband / stereo tool, racks detected (Waves StudioRack, Blue Cat PatchWork, Kilohearts Snap Heap, …), and any user overrides. `all_installed` caps at 150 entries unless `full_list=True`. |
-| `set_fx_preferences(preferences)` | Pin a category → plugin mapping. Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` (or `~/.config/reaper_mcp/` on *nix). |
+| `set_fx_preferences(preferences)` | Pin a category → plugin mapping. Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` (or `~/.config/reaper_mcp/` on *nix). The mix and master pipelines apply a preference for `eq`, `compressor`, `reverb` and `limiter` when they have a parameter map for that plugin (REAPER stock, and FabFilter Pro-Q 3 / Pro-C 2 / Pro-R / Pro-L 2). The response's `engine_support` reports which of your preferences the engine can use; for any it can't, the pipeline uses the best supported plugin and says so in its result's `preferences_ignored`. |
 
 ## Mix & Master
 

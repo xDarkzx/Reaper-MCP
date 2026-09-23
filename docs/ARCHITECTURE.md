@@ -218,9 +218,15 @@ That means the same style profile works regardless of whether you named your kic
 
 ### Plugin parameter translation
 
-`plugins.py` holds a tightly calibrated param-name mapping for FabFilter Pro-Q 3 / Pro-C 2 / Pro-R and REAPER stock. For other brands (Waves, iZotope, Valhalla, Softube …) the engine adds the plugin but uses fuzzy name matching — approximate, works for most cases, and the user is told to fine-tune afterwards.
+`plugins.py` holds tightly calibrated parameter maps for two plugin families: FabFilter (Pro-Q 3 / Pro-C 2 / Pro-R / Pro-L 2) and REAPER stock (ReaEQ / ReaComp / ReaVerbate / ReaLimit). The pipelines place only plugins from those families. For other brands (Waves, iZotope, Valhalla, Softube …) they use the best supported plugin for the category instead, and the AI is told to set up the other plugin itself with `setup_fx_chain`.
 
-Users can pin category → plugin preferences via `set_fx_preferences({"eq": "...", "compressor": "..."})`. Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` on Windows and `~/.config/reaper_mcp/` on macOS / Linux.
+### Plugin selection
+
+The mix, master, fix-mix and bus pipelines choose a plugin family **per category** (eq, compressor, reverb, limiter), not one flag for everything. `selection.py` starts from the installed-plugin inventory (`get_inventory`, built from `fx_list_installed`, with the user's preferences applied) and resolves each category to the family whose parameter map can drive the chosen plugin. A `CompositeProfile` then builds each stage from its own category's family, so a preference for ReaEQ as the EQ doesn't change the compressor, and the master chain builds each stage (EQ, compressor, limiter) the same way.
+
+REAPER's own plugins are a last resort: a category uses the stock plugin only when no supported third-party plugin is installed for it, even if a preference names the stock one. A preference the engine can't honor (a plugin it has no parameter map for, one that isn't installed, or a stock plugin while a third-party one is available) is never silently dropped: the pipeline uses the best supported plugin for that category and lists the reason under `preferences_ignored` in its result, and `set_fx_preferences` reports up front which preferences the engine can use (`engine_support`). Every pipeline result also carries `plugin_families`, the family used for each category.
+
+Users pin category → plugin preferences via `set_fx_preferences({"eq": "...", "compressor": "..."})`. Stored at `%APPDATA%/reaper_mcp/fx_prefs.json` on Windows and `~/.config/reaper_mcp/` on macOS / Linux.
 
 ---
 

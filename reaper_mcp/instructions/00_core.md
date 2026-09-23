@@ -135,14 +135,20 @@ Always call `fx_list_installed()` first. Returns:
   user wants to use modules inside a rack, they set it up manually.
 - `user_overrides`: explicit category→plugin mapping from their prefs file.
 
-**When calling `engine_mix` / `engine_master`**: the mix pipeline's built-in
-calibrated param profiles only cover FabFilter + REAPER stock. For Waves /
-iZotope / Valhalla etc., the pipeline adds them but uses fuzzy param-name
-matching (approximate — user should fine-tune in the plugin UI afterwards).
-Tell the user this.
+**When calling `engine_mix` / `engine_master`**: the pipeline only places
+plugins it has calibrated parameter maps for — FabFilter Pro-Q 3 / Pro-C 2 /
+Pro-R / Pro-L 2 and REAPER's own ReaEQ / ReaComp / ReaVerbate / ReaLimit —
+chosen per category. It does not place Waves / iZotope / Valhalla etc.; it
+uses the best supported plugin for that category instead. If the user wants
+another plugin, set it up yourself with `setup_fx_chain` and tell them its
+settings are approximate. The result's `plugin_families` shows what was used
+for each category.
 
 **User can lock in preferences** via `set_fx_preferences({"eq":"...","compressor":"..."})`.
-Stored in `%APPDATA%/reaper_mcp/fx_prefs.json`.
+Stored in `%APPDATA%/reaper_mcp/fx_prefs.json`. A preference applies to eq,
+compressor, reverb and limiter when the engine supports that plugin, and the
+response's `engine_support` says which it can use. If a mix or master result
+has `preferences_ignored`, tell the user which preference wasn't used and why.
 
 ## `engine_mix(style, clean=True)` — per-track EQ + compression + reverb buses
 Auto-detects FabFilter (Pro-Q 3 / Pro-C 2 / Pro-R) or falls back to REAPER stock
