@@ -26,6 +26,11 @@ def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool
     negative. A silent write here doesn't error — it just corrupts the
     track (negative/zero gain reads as silence or worse), so this has to be
     caught at the boundary, not discovered after the fact.
+
+    IMPORTANT — do NOT clamp negative dB values to 0.0. A value of 0.0 is
+    −inf dB (total silence). If you have a dB value, convert it first:
+        linear_gain = 10 ** (db_value / 20)
+    e.g. -6 dB → 10 ** (-6/20) ≈ 0.501, not 0.0.
     """
     if is_fx_param:
         if not 0.0 <= value <= 1.0:
@@ -40,7 +45,8 @@ def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool
                 ErrorCode.VALUE_OUT_OF_RANGE,
                 f"point[{index}]: {envelope_name} envelope value must be linear gain "
                 f"(>= 0, 1.0 = unity/0dB) — got {value!r}, which looks like a raw dB "
-                f"value. Convert first: value = 10 ** (db / 20).",
+                f"value. Convert first: value = 10 ** (db / 20). "
+                f"Do NOT clamp negative dB to 0.0 — that is silence (−inf dB).",
             )
     elif envelope_name in _PAN_ENVELOPES:
         if not -1.0 <= value <= 1.0:
@@ -115,6 +121,9 @@ def register(mcp: FastMCP):
         Value units:
           - Volume track env: linear gain where 1.0 = unity (0 dB), 2.0 ≈ +6 dB,
                               0.5 ≈ -6 dB. Use 10**(db/20) to convert from dB.
+                              WARNING: 0.0 = −inf dB (total silence). NEVER clamp a
+                              negative dB value to 0.0 — convert it instead:
+                              value = 10 ** (db / 20)  # e.g. -6 dB → 0.501
           - Pan: -1.0 (hard left) to +1.0 (hard right).
           - Mute: 0.0 or 1.0.
           - FX params: 0.0-1.0 normalized (same as setup_fx_chain's params/params_by_index).
@@ -145,6 +154,23 @@ def register(mcp: FastMCP):
                     f"point[{i}] must be object with 'time' and 'value' keys",
                 )
             _validate_envelope_value(pt["value"], envelope_name, is_fx_param, i)
+
+        # Guard against an all-zero gain envelope batch — this is almost always a
+        # model unit-conversion failure where the client clamped negative dB values
+        # to 0.0. A single zero is legal (fade to silence), but an entire batch at
+        # 0.0 on a gain envelope is −inf dB across the board and essentially never
+        # intentional. Raise early so the client can correct the dB conversion.
+        if not is_fx_param and envelope_name in _GAIN_ENVELOPES:
+            if len(pts) > 1 and all(pt.get("value", 1.0) == 0.0 for pt in pts):
+                raise ReaperMCPError(
+                    ErrorCode.VALUE_OUT_OF_RANGE,
+                    f"All {len(pts)} points have value=0.0 on a {envelope_name} envelope, "
+                    f"which is −inf dB (total silence). This almost certainly means dB "
+                    f"values were clamped to 0 instead of converted. "
+                    f"Fix: value = 10 ** (db / 20)  — e.g. -6 dB → 0.501, 0 dB → 1.0. "
+                    f"Individual zero-value points are allowed (fades); a uniform-zero "
+                    f"batch is not.",
+                )
         payload = {
             "track_index": track_index,
             "envelope_name": envelope_name,
