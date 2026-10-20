@@ -62,6 +62,28 @@ def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool
             )
 
 
+def _validate_gain_batch(pts: list, envelope_name: str) -> None:
+    """Reject an all-zero batch on a gain envelope.
+
+    A single zero-value point is legal (fade to silence). An entire batch of
+    2+ points all at 0.0 is −inf dB everywhere — almost always a model
+    unit-conversion failure where negative dB values were clamped to 0.0
+    instead of converted with 10 ** (db / 20).
+    """
+    if envelope_name not in _GAIN_ENVELOPES:
+        return
+    if len(pts) > 1 and all(pt.get("value", 1.0) == 0.0 for pt in pts):
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            f"All {len(pts)} points have value=0.0 on a {envelope_name} envelope, "
+            f"which is \u2212inf dB (total silence). This almost certainly means dB "
+            f"values were clamped to 0 instead of converted. "
+            f"Fix: value = 10 ** (db / 20)  \u2014 e.g. -6 dB \u2192 0.501, 0 dB \u2192 1.0. "
+            f"Individual zero-value points are allowed (fades); a uniform-zero "
+            f"batch is not.",
+        )
+
+
 def register(mcp: FastMCP):
     from reaper_mcp.main import client
 
@@ -155,22 +177,9 @@ def register(mcp: FastMCP):
                 )
             _validate_envelope_value(pt["value"], envelope_name, is_fx_param, i)
 
-        # Guard against an all-zero gain envelope batch — this is almost always a
-        # model unit-conversion failure where the client clamped negative dB values
-        # to 0.0. A single zero is legal (fade to silence), but an entire batch at
-        # 0.0 on a gain envelope is −inf dB across the board and essentially never
-        # intentional. Raise early so the client can correct the dB conversion.
-        if not is_fx_param and envelope_name in _GAIN_ENVELOPES:
-            if len(pts) > 1 and all(pt.get("value", 1.0) == 0.0 for pt in pts):
-                raise ReaperMCPError(
-                    ErrorCode.VALUE_OUT_OF_RANGE,
-                    f"All {len(pts)} points have value=0.0 on a {envelope_name} envelope, "
-                    f"which is −inf dB (total silence). This almost certainly means dB "
-                    f"values were clamped to 0 instead of converted. "
-                    f"Fix: value = 10 ** (db / 20)  — e.g. -6 dB → 0.501, 0 dB → 1.0. "
-                    f"Individual zero-value points are allowed (fades); a uniform-zero "
-                    f"batch is not.",
-                )
+        if not is_fx_param:
+            _validate_gain_batch(pts, envelope_name)
+
         payload = {
             "track_index": track_index,
             "envelope_name": envelope_name,
