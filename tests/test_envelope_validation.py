@@ -121,10 +121,16 @@ class TestValidateGainBatch:
         pts = [{"time": i * 1.0, "value": 0.0} for i in range(3)]
         _validate_gain_batch(pts, "Mute")
 
-    def test_width_pre_fx_all_zero_raises(self):
+    def test_width_all_zero_passes(self):
+        # Width isn't dB-based — all-zero means "collapsed to mono", an
+        # ordinary intentional request, not the silence-by-clamping bug
+        # this guard exists to catch.
         pts = [{"time": i * 0.5, "value": 0.0} for i in range(4)]
-        with pytest.raises(ReaperMCPError):
-            _validate_gain_batch(pts, "Width (Pre-FX)")
+        _validate_gain_batch(pts, "Width")
+
+    def test_width_pre_fx_all_zero_passes(self):
+        pts = [{"time": i * 0.5, "value": 0.0} for i in range(4)]
+        _validate_gain_batch(pts, "Width (Pre-FX)")
 
     def test_volume_pre_fx_all_zero_raises(self):
         pts = [{"time": i * 0.5, "value": 0.0} for i in range(4)]
