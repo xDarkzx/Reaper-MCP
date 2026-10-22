@@ -18,6 +18,12 @@ _TRACK_ENVELOPE_NAMES = {
 _GAIN_ENVELOPES = {"Volume", "Volume (Pre-FX)", "Width", "Width (Pre-FX)"}
 _PAN_ENVELOPES = {"Pan", "Pan (Pre-FX)"}
 
+# Subset of _GAIN_ENVELOPES actually measured in dB, where an all-zero batch
+# is almost certainly an AI unit-conversion mistake (see _validate_gain_batch).
+# Width isn't dB-based at all — 0.0 width means "collapsed to mono", a
+# perfectly ordinary intentional request, not silence.
+_DB_ENVELOPES = {"Volume", "Volume (Pre-FX)"}
+
 
 def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool, index: int):
     """Catch the most common wrong-unit mistake before it reaches REAPER:
@@ -63,14 +69,19 @@ def _validate_envelope_value(value: float, envelope_name: str, is_fx_param: bool
 
 
 def _validate_gain_batch(pts: list, envelope_name: str) -> None:
-    """Reject an all-zero batch on a gain envelope.
+    """Reject an all-zero batch on a dB-based envelope (Volume).
 
     A single zero-value point is legal (fade to silence). An entire batch of
     2+ points all at 0.0 is −inf dB everywhere — almost always a model
     unit-conversion failure where negative dB values were clamped to 0.0
     instead of converted with 10 ** (db / 20).
+
+    Width isn't checked here even though it shares _GAIN_ENVELOPES for its
+    per-point >= 0 rule: Width isn't dB-based, so there's no equivalent
+    conversion mistake to catch, and an all-zero Width batch (collapsed to
+    mono) is a perfectly ordinary intentional request, not silence.
     """
-    if envelope_name not in _GAIN_ENVELOPES:
+    if envelope_name not in _DB_ENVELOPES:
         return
     if len(pts) > 1 and all(pt.get("value", 1.0) == 0.0 for pt in pts):
         raise ReaperMCPError(

@@ -17,17 +17,20 @@ All notable changes to ReaperMCP will be documented in this file.
   is the first mono input, not "none"); it now gives the correct ranges.
   Tests run the real handler under `lupa` with a stubbed `reaper`.
 
-- **`envelope_add_points` accepted an all-zero batch on Volume/Width envelopes
+- **`envelope_add_points` accepted an all-zero batch on the Volume envelope
   and reported success, silently writing −∞ dB (total silence) to the track.**
   This is the failure mode described in issue #39: AI clients that receive the
   "must be linear gain (≥ 0)" error for a negative dB value "fix" it by
   clamping every point to `0.0`, which passes per-point validation but
   produces an all-silence envelope. The server now rejects any batch of 2+
-  points where every value is `0.0` on a gain envelope (`Volume`,
-  `Volume (Pre-FX)`, `Width`, `Width (Pre-FX)`) with a `VALUE_OUT_OF_RANGE`
+  points where every value is `0.0` on a dB-based envelope (`Volume`,
+  `Volume (Pre-FX)`) with a `VALUE_OUT_OF_RANGE`
   error that explicitly says "do not clamp — convert: `value = 10 ** (db / 20)`".
   Single zero-value points (legitimate fade-to-silence points) are still
-  allowed. The error message on negative values and the docstrings for
+  allowed. `Width`/`Width (Pre-FX)` are deliberately excluded — Width isn't
+  dB-based, so there's no equivalent conversion mistake, and an all-zero
+  Width batch (collapsed to mono) is an ordinary intentional request, not
+  silence. The error message on negative values and the docstrings for
   `_validate_envelope_value` and `envelope_add_points` also now carry an
   explicit "NEVER clamp negative dB to 0.0" warning. Covered by new tests
   in `tests/test_envelope_validation.py`.
