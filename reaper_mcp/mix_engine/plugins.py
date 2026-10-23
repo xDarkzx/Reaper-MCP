@@ -25,11 +25,13 @@ _REAEQ_FREQ_POINTS = [
     (24000.0, 1.0),
 ]
 
-# ReaEQ gain: 0.25 = 0dB, linear 24dB/unit
-_REAEQ_GAIN_CENTER = 0.25
-_REAEQ_GAIN_SCALE = 24.0  # dB per unit
-
-
+# ReaEQ gain: measured live (fx_get_params read-back against REAPER 7.82 and
+# independently against another install) — 0.25 = 0dB, and the scale is
+# exponential (amplitude), not linear in dB. 0.1667 -> -3.5dB, 0.3333 -> +2.5dB,
+# confirmed live both from a bug report's 12-point sweep and a fresh read-back
+# in this session. The previous linear formula (0.25 + db/24) was wrong by a
+# growing margin away from 0dB — e.g. an intended -2dB cut actually landed at
+# -3.5dB.
 def _hz_to_reaeq(hz: float) -> float:
     """Convert Hz to ReaEQ normalized 0-1 via log-linear interpolation."""
     hz = max(20.0, min(24000.0, hz))
@@ -46,8 +48,23 @@ def _hz_to_reaeq(hz: float) -> float:
 
 
 def _db_to_reaeq_gain(db: float) -> float:
-    """Convert dB to ReaEQ gain parameter (0-1). 0dB = 0.25."""
-    return max(0.0, min(1.0, _REAEQ_GAIN_CENTER + db / _REAEQ_GAIN_SCALE))
+    """Convert dB to ReaEQ gain parameter (0-1). 0.25 = 0dB, 1.0 = +12dB."""
+    return max(0.0, min(1.0, 10 ** (db / 20.0) / 4.0))
+
+
+def _q_to_reaeq_bw(q: float) -> float:
+    """Convert Q factor to ReaEQ's BW parameter (0-1 = 0-4 octaves).
+
+    Measured live: BW param value * 4 = bandwidth in octaves (0.2 -> 0.80oct,
+    0.5 -> 2.00oct, confirmed via fx_get_params read-back). The previous
+    code wrote q / 5.0 directly as the BW param — since BW increases with
+    the param value, a higher Q (meant to be narrower) produced a *wider*
+    band, backwards from what Q means. This uses the standard Q<->bandwidth
+    relationship: octaves = 2/ln(2) * asinh(1 / (2*Q)).
+    """
+    q = max(0.01, q)
+    octaves = 2.0 / math.log(2.0) * math.asinh(1.0 / (2.0 * q))
+    return max(0.0, min(1.0, octaves / 4.0))
 
 
 # ────────────────────────────────────────────────────────────────
@@ -153,7 +170,7 @@ class ReaperStockProfile:
         if low_shelf_band:
             params[0] = _hz_to_reaeq(low_shelf_band["freq"])
             params[1] = _db_to_reaeq_gain(low_shelf_band["gain_db"])
-            params[2] = low_shelf_band.get("q", 0.8) / 5.0  # normalize Q
+            params[2] = _q_to_reaeq_bw(low_shelf_band.get("q", 0.8))
         else:
             # Disable band 1 (0 gain)
             params[1] = _db_to_reaeq_gain(0.0)
@@ -163,7 +180,7 @@ class ReaperStockProfile:
             b = bell_bands[0]
             params[3] = _hz_to_reaeq(b["freq"])
             params[4] = _db_to_reaeq_gain(b["gain_db"])
-            params[5] = b.get("q", 1.0) / 5.0
+            params[5] = _q_to_reaeq_bw(b.get("q", 1.0))
         else:
             params[4] = _db_to_reaeq_gain(0.0)
 
@@ -172,7 +189,7 @@ class ReaperStockProfile:
             b = bell_bands[1]
             params[6] = _hz_to_reaeq(b["freq"])
             params[7] = _db_to_reaeq_gain(b["gain_db"])
-            params[8] = b.get("q", 1.0) / 5.0
+            params[8] = _q_to_reaeq_bw(b.get("q", 1.0))
         else:
             params[7] = _db_to_reaeq_gain(0.0)
 
@@ -180,9 +197,23 @@ class ReaperStockProfile:
         if high_shelf_band:
             params[9] = _hz_to_reaeq(high_shelf_band["freq"])
             params[10] = _db_to_reaeq_gain(high_shelf_band["gain_db"])
-            params[11] = high_shelf_band.get("q", 0.8) / 5.0
+            params[11] = _q_to_reaeq_bw(high_shelf_band.get("q", 0.8))
         else:
             params[10] = _db_to_reaeq_gain(0.0)
+
+        # ReaEQ only has 2 generic (bell-shaped) slots (band 2/3) — band 1
+        # and band 4 are hard-wired to Low Shelf / High Shelf in the plugin
+        # itself (confirmed live: their REAPER param names are literally
+        # "Freq-Low Shelf" / "Freq-High Shelf 4", not a switchable type), so
+        # a 3rd+ bell can't be placed without silently becoming a shelf.
+        # Report it instead of dropping it with no trace.
+        if len(bell_bands) > 2:
+            dropped = bell_bands[2:]
+            logger.warning(
+                "ReaEQ only has 2 bell slots; dropping %d band(s) that don't fit: %s",
+                len(dropped),
+                ", ".join(f"{b['freq']}Hz {b['gain_db']:+.1f}dB" for b in dropped),
+            )
 
         return {
             "name": self.eq_name,
@@ -192,17 +223,33 @@ class ReaperStockProfile:
     def compression_fx_chain_entry(self, comp_profile: dict) -> dict:
         """Build an fx_chain entry for ReaComp from a compression profile dict.
 
-        ReaComp param indices (measured from plugin):
-          0: Thresh       — 0.0=-60dB, 1.0=0dB (linear in dB)
-          1: Pre-Comp     — lookahead ms (0-1, we keep at 0)
-          2: Attack       — 0.0=0.1ms, 1.0=1000ms (log scale)
-          3: Release      — 0.0=1ms, 1.0=3000ms (log scale)
-          4: Ratio         — 0.0=1:1, 1.0=20:1 (ish, nonlinear)
-          5: Knee          — 0.0=0dB, 1.0=max knee
-          6: RMS size      — detection window (default ~0.01)
-          7: Makeup/Output — 0.0=-inf, 0.5=0dB, 1.0=+24dB
+        ReaComp param indices — confirmed live via fx_get_params read-back
+        (name + REAPER-formatted display), not assumed:
+          0: Threshold    — amplitude, 10**(dB/20). 0.8333 reads "-0.00 dB".
+          1: Ratio        — (ratio-1)/99. 0.0303 reads "4.00 :1".
+          2: Attack       — linear ms/500. 0.006 reads "3.0 ms".
+          3: Release      — linear ms/5000. 0.02 reads "100 ms".
+          4: Pre-comp     — lookahead ms/250; kept at 0 (off).
+          5: resvd        — unused; never written.
+          6: Lowpass      — detector sidechain lowpass; 1.0 reads "20000 Hz"
+                            (off/wide open). Kept at 1.0 so the detector
+                            isn't filtered.
+          7: Hipass       — detector sidechain highpass; 0.0 reads "0 Hz"
+                            (off). Kept at 0.0 for the same reason.
+          11: Wet         — amplitude, 10**(dB/20), confirmed live by setting
+                            0.7/1.3 and reading back "-3.1 dB"/"+2.3 dB".
+                            Used as makeup/output gain.
+          13: RMS size    — detection window, kept at plugin default.
+          14: Knee        — dB/24. 0.0 reads "0.0 dB".
+
+        Previously this assumed Pre-comp was at 1 and Ratio at 4 (swapped),
+        Knee at 5 (actually the unused "resvd" slot) and RMS size at 6
+        (actually the detector's sidechain lowpass) — so ratio silently
+        stayed at 1:1 always, knee was never set, and the detector's own
+        sidechain was filtered through a 200Hz lowpass + ~11kHz highpass,
+        leaving it nearly deaf. Makeup previously wrote to index 7
+        ("Hipass"), which doesn't do anything useful as gain.
         """
-        import math
         thresh = comp_profile.get("threshold_db", -18.0)
         ratio = comp_profile.get("ratio", 2.0)
         attack_ms = comp_profile.get("attack_ms", 20.0)
@@ -210,35 +257,25 @@ class ReaperStockProfile:
         makeup_db = comp_profile.get("makeup_db", 2.0)
         knee_db = comp_profile.get("knee_db", 6.0)
 
-        # Thresh: -60dB=0.0, 0dB=1.0
-        thresh_norm = max(0.0, min(1.0, (thresh + 60.0) / 60.0))
-
-        # Attack: log scale ~0.1ms to ~1000ms
-        attack_norm = max(0.0, min(1.0, math.log10(max(0.1, attack_ms) / 0.1) / 4.0))
-
-        # Release: log scale ~1ms to ~3000ms
-        release_norm = max(0.0, min(1.0, math.log10(max(1.0, release_ms)) / math.log10(3000)))
-
-        # Ratio: approximate — 1:1=0, 4:1≈0.25, 10:1≈0.5, 20:1=1.0
-        ratio_norm = max(0.0, min(1.0, (ratio - 1.0) / 19.0))
-
-        # Knee: 0dB=0.0, ~12dB=1.0
-        knee_norm = max(0.0, min(1.0, knee_db / 12.0))
-
-        # Makeup: 0dB=0.5, +24dB=1.0
-        makeup_norm = max(0.0, min(1.0, 0.5 + makeup_db / 48.0))
+        thresh_norm = max(0.0, min(1.0, 10 ** (thresh / 20.0)))
+        ratio_norm = max(0.0, min(1.0, (ratio - 1.0) / 99.0))
+        attack_norm = max(0.0, min(1.0, attack_ms / 500.0))
+        release_norm = max(0.0, min(1.0, release_ms / 5000.0))
+        knee_norm = max(0.0, min(1.0, knee_db / 24.0))
+        makeup_norm = max(0.0, min(4.0, 10 ** (makeup_db / 20.0)))
 
         return {
             "name": self.compressor_name,
             "params_by_index": {
                 0: thresh_norm,
-                1: 0.0,            # pre-comp off
+                1: ratio_norm,
                 2: attack_norm,
                 3: release_norm,
-                4: ratio_norm,
-                5: knee_norm,
-                6: 0.01,           # RMS size default
-                7: makeup_norm,
+                4: 0.0,            # pre-comp off
+                6: 1.0,            # detector sidechain lowpass off
+                7: 0.0,            # detector sidechain highpass off
+                11: makeup_norm,   # Wet, used as makeup/output gain
+                14: knee_norm,
             },
         }
 
@@ -253,6 +290,17 @@ class ReaperStockProfile:
                 # double the level. Was previously 1.0 (bug), causing ~3dB
                 # too-loud reverb returns.
                 1: 0.0,
+                # KNOWN GAP (checked live, not yet fixed): "room_size" is
+                # passed straight through assuming a 1:1 normalized scale,
+                # but the real plugin's curve isn't linear — confirmed via
+                # fx_get_params read-back: 0.25->"47", 0.5->"64", 0.75->"81",
+                # 1.0->"98", not a clean sqrt/log fit either from those
+                # points. "dampening" IS a clean 1:1 pass-through (0.5->"50"
+                # exactly), confirmed the same way. Needs a proper multi-point
+                # sweep (fx_scan_params, once its crash on ReaComp/ReaLimit is
+                # fixed) rather than a guessed curve. Lower severity than the
+                # ReaComp/ReaLimit/ReaEQ bugs — the reverb's "size" feel is
+                # off, not broken or silent.
                 2: reverb_config.get("room_size", 0.5),
                 3: reverb_config.get("dampening", 0.5),
                 4: reverb_config.get("width", 1.0),

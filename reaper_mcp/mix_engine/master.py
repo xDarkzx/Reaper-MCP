@@ -24,6 +24,9 @@ from reaper_mcp.mix_engine.selection import PluginSelection, select_plugins
 from reaper_mcp.mix_engine.profiles_v2 import (
     MasteringChain, CompProfile, get_profile,
 )
+from reaper_mcp.mix_engine.plugins import (
+    ReaperStockProfile, _hz_to_reaeq, _db_to_reaeq_gain, _q_to_reaeq_bw,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,101 +107,95 @@ def _build_master_fx_chain(spec: MasteringChain, selection: PluginSelection) -> 
 # ────────────────────────── ReaEQ builders ──────────────────────────
 
 def _rea_subtractive_eq(spec: MasteringChain) -> dict:
-    """ReaEQ: HP at 25Hz to strip subsonic rumble + optional bus cuts."""
-    import math
+    """ReaEQ: HP at 25Hz to strip subsonic rumble + optional bus cuts.
 
-    # ReaEQ freq normalization (log-linear)
-    def hz_to_reaeq(hz):
-        hz = max(20.0, min(24000.0, hz))
-        # Approximate log-linear: 20Hz=0, 24kHz=1
-        return math.log(hz / 20.0) / math.log(24000.0 / 20.0)
-
-    def db_to_reaeq(db):
-        return max(0.0, min(1.0, 0.25 + db / 24.0))
-
+    Uses plugins.py's calibrated _hz_to_reaeq/_db_to_reaeq_gain instead of a
+    local approximation — the previous local hz_to_reaeq was a pure log map
+    (20Hz=0, 24kHz=1), which doesn't match the plugin's actual piecewise
+    curve (e.g. it put an intended 80Hz low shelf at 153.6Hz), and the local
+    db_to_reaeq was linear where the real scale is exponential.
+    """
     params = {
         # Band 5 = high-pass
-        12: hz_to_reaeq(25),        # HP at 25Hz for subsonic
-        13: db_to_reaeq(0.0),
+        12: _hz_to_reaeq(25),        # HP at 25Hz for subsonic
+        13: _db_to_reaeq_gain(0.0),
         14: 0.7,
         # Silence other bands
-        1: db_to_reaeq(0.0),
-        4: db_to_reaeq(0.0),
-        7: db_to_reaeq(0.0),
-        10: db_to_reaeq(0.0),
+        1: _db_to_reaeq_gain(0.0),
+        4: _db_to_reaeq_gain(0.0),
+        7: _db_to_reaeq_gain(0.0),
+        10: _db_to_reaeq_gain(0.0),
     }
     return {"name": "ReaEQ", "params_by_index": params}
 
 
 def _rea_tonal_eq(spec: MasteringChain) -> dict:
-    import math
-    def hz_to_reaeq(hz):
-        hz = max(20.0, min(24000.0, hz))
-        return math.log(hz / 20.0) / math.log(24000.0 / 20.0)
-    def db_to_reaeq(db):
-        return max(0.0, min(1.0, 0.25 + db / 24.0))
+    """ReaEQ: low shelf for weight, high shelf for air.
 
+    Same calibration fix as _rea_subtractive_eq. Band 5 (high-pass) is
+    explicitly zeroed here too — this is a separate ReaEQ instance from
+    the subtractive stage, so band 5 starts at the plugin's own default
+    (observed live: 100Hz) rather than inheriting the subtractive stage's
+    25Hz setting, and nothing previously confirmed whether that band is
+    enabled by default. Setting its gain to 0dB and frequency down to
+    20Hz makes it harmless either way, rather than leaving an unconfirmed
+    ~100Hz high-pass possibly active on the master.
+    """
     params = {
         # Band 1 = Low shelf
-        0: hz_to_reaeq(spec.low_shelf_freq),
-        1: db_to_reaeq(spec.low_shelf_db),
-        2: 0.8 / 5.0,
+        0: _hz_to_reaeq(spec.low_shelf_freq),
+        1: _db_to_reaeq_gain(spec.low_shelf_db),
+        2: _q_to_reaeq_bw(0.8),
         # Band 4 = High shelf
-        9: hz_to_reaeq(spec.high_shelf_freq),
-        10: db_to_reaeq(spec.high_shelf_db),
-        11: 0.7 / 5.0,
-        # Silence band 2/3 and HP
-        4: db_to_reaeq(0.0),
-        7: db_to_reaeq(0.0),
-        13: db_to_reaeq(0.0),
+        9: _hz_to_reaeq(spec.high_shelf_freq),
+        10: _db_to_reaeq_gain(spec.high_shelf_db),
+        11: _q_to_reaeq_bw(0.7),
+        # Silence band 2/3 and HP (band 5) — see docstring on why HP is
+        # explicitly zeroed rather than left untouched.
+        4: _db_to_reaeq_gain(0.0),
+        7: _db_to_reaeq_gain(0.0),
+        12: _hz_to_reaeq(20),
+        13: _db_to_reaeq_gain(0.0),
     }
     return {"name": "ReaEQ", "params_by_index": params}
 
 
 def _rea_bus_comp(comp: CompProfile) -> dict:
-    """ReaComp — gentle master bus glue."""
-    import math
+    """ReaComp — gentle master bus glue.
 
-    def norm_thresh(db):
-        return max(0.0, min(1.0, (db + 60.0) / 60.0))
-    def norm_ratio(r):
-        return max(0.0, min(1.0, (r - 1.0) / 19.0))
-    def norm_attack(ms):
-        return max(0.0, min(1.0, math.log10(max(0.1, ms) / 0.1) / 4.0))
-    def norm_release(ms):
-        return max(0.0, min(1.0, math.log10(max(1.0, ms)) / math.log10(3000)))
-    def norm_makeup(db):
-        return max(0.0, min(1.0, 0.5 + db / 48.0))
-
-    return {
-        "name": "ReaComp",
-        "params_by_index": {
-            0: norm_thresh(comp.threshold_db),
-            1: 0.0,
-            2: norm_attack(comp.attack_ms),
-            3: norm_release(comp.release_ms),
-            4: norm_ratio(comp.ratio),
-            5: max(0.0, min(1.0, comp.knee_db / 12.0)),
-            6: 0.01,
-            7: norm_makeup(comp.makeup_db),
-        },
-    }
+    Delegates to ReaperStockProfile's corrected compression_fx_chain_entry
+    instead of keeping a second, separately-calibrated copy of the same
+    param map — this file previously had its own index map here with the
+    identical bug (ratio/pre-comp swapped, knee/RMS on the wrong indices)."""
+    return ReaperStockProfile().compression_fx_chain_entry(comp.to_dict())
 
 
 def _rea_limiter(spec: MasteringChain) -> dict:
-    """ReaLimit / JS: Limiter — set ceiling at true_peak_db."""
-    # ReaLimit params: 0=Threshold (aka input gain), 1=Ceiling, 2=Release
-    # Threshold 0=-60dB .. 1=0dB; start at 0dB (no drive), user tunes up
-    # Ceiling 0=-60dB .. 1=0dB
-    def norm_db(db):
-        return max(0.0, min(1.0, (db + 60.0) / 60.0))
+    """ReaLimit — set ceiling at true_peak_db.
+
+    Threshold and ceiling have different ranges — confirmed live via
+    fx_get_params read-back (name + REAPER-formatted display):
+      Threshold (0): -60..+12 dB. Default value 0.8333 reads "-0.00 dB".
+      Ceiling (1):   -24..0 dB.   Default value 1.0 reads "+0.00 dB".
+    Both were previously normalized over the same -60..0 dB range, so an
+    intended 0dB threshold (value 1.0 under that wrong range) actually
+    landed at +12dB, and an intended -1dB ceiling (0.9833) landed at
+    -0.4dB — the limiter's output gain is ceiling-threshold, so the whole
+    master was cut by the difference (~12dB), matching a reported -12.36
+    dBTP render where ~-1dBTP was intended.
+    """
+    def norm_threshold(db):
+        return max(0.0, min(1.0, (db + 60.0) / 72.0))
+
+    def norm_ceiling(db):
+        return max(0.0, min(1.0, (db + 24.0) / 24.0))
 
     release_norm = {"transparent": 0.5, "warm": 0.7, "punchy": 0.3, "aggressive": 0.2}
     return {
         "name": "ReaLimit",
         "params_by_index": {
-            0: norm_db(0.0),                       # threshold (input) — user tweaks
-            1: norm_db(spec.true_peak_db),         # ceiling
+            0: norm_threshold(0.0),                 # threshold (input) — user tweaks
+            1: norm_ceiling(spec.true_peak_db),      # ceiling
             2: release_norm.get(spec.limiter_character, 0.4),
         },
     }
