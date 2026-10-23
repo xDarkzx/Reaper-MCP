@@ -4,6 +4,75 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The stock-plugin fallback (ReaComp/ReaLimit/ReaEQ, used by `engine_mix`/
+  `engine_master` whenever FabFilter isn't installed) wrote several
+  parameters to the wrong index or the wrong scale, producing a mix with no
+  compression anywhere, a master ~12dB too quiet, and EQ cuts/boosts off by
+  a growing margin from what was asked for** (issue #41, reported with an
+  exceptionally thorough live measurement of REAPER 7.82's real parameter
+  behavior). All of the following were confirmed independently this
+  session via `fx_get_params` read-back (name + REAPER-formatted display)
+  against a real install, not just the report:
+  - **ReaComp**: `Ratio` and `Pre-comp` were swapped (index 1 was written
+    as pre-comp-off, index 4 as ratio — the real plugin has them the other
+    way round), so the compressor's ratio silently never moved off 1:1.
+    `Knee` was written to index 5 (an unused/reserved slot); the real Knee
+    is at index 14. Index 6/7 were treated as "RMS size"/"makeup", but are
+    actually the detector's own sidechain lowpass/highpass filters — left
+    at the old formula's values, they put the detector behind a ~200Hz
+    lowpass and an ~11kHz highpass, so it heard almost nothing regardless
+    of the ratio fix. Makeup gain is now correctly written to index 11
+    ("Wet"), confirmed live to be a plain amplitude control
+    (`10**(dB/20)`) — the original report left this unconfirmed; this
+    session resolved it with a direct live test.
+  - **ReaLimit**: threshold and ceiling were both normalized over the same
+    -60..0dB range, but the real ranges are -60..+12dB (threshold) and
+    -24..0dB (ceiling) — confirmed live. An intended 0dB threshold actually
+    landed at +12dB and an intended -1dB ceiling landed at -0.4dB, cutting
+    the whole master by the ~12.4dB difference between them.
+  - **ReaEQ gain**: the formula was linear in dB (`0.25 + db/24`); the real
+    scale is exponential (`10**(db/20)/4`), confirmed live. The error grows
+    with distance from 0dB — an intended -2dB cut actually landed at -3.5dB.
+  - **ReaEQ bandwidth**: Q was written directly as the BW param
+    (`q / 5.0`), but BW increases with the param value on the real plugin,
+    so a *higher* (narrower-intended) Q produced a *wider* band — backwards
+    from what Q means. Now uses the standard Q<->bandwidth relationship.
+  - **A 3rd+ EQ bell band was silently dropped** with no indication in the
+    response. ReaEQ only has 2 generic bell slots; band 1/4 are hard-wired
+    to Low Shelf/High Shelf in the plugin itself (confirmed live via their
+    REAPER parameter names, literally `Freq-Low Shelf` / `Freq-High Shelf
+    4`, not a switchable type) — so reusing a free shelf slot for an extra
+    bell was considered and rejected, since it would silently apply a
+    shelf-shaped curve instead of a bell. Dropped bands are now logged
+    instead.
+  - **`master.py` had its own, separately-calibrated (and equally wrong)
+    copies** of the ReaEQ frequency/gain formulas and the ReaComp index map,
+    instead of reusing `plugins.py`'s versions. Both now import/delegate to
+    the single corrected implementation.
+  - Also fixed: the master-bus tonal EQ (a separate ReaEQ instance from the
+    subtractive stage) never explicitly zeroed its own band 5 (high-pass),
+    which defaults to an unconfirmed ~100Hz on at least one install — it's
+    now explicitly set to 20Hz/0dB regardless, harmless either way.
+  - **Known remaining gap, lower severity, not yet fixed**: ReaVerbate's
+    `room_size` parameter isn't the 1:1 pass-through the code assumes —
+    confirmed live it's non-linear (0.25→"47", 0.5→"64", 0.75→"81", not a
+    clean sqrt/log fit from those points either). `dampening` *is* a clean
+    1:1 pass-through, confirmed the same way. This affects the reverb's
+    "size" feel, not whether it's audible — left for a follow-up with a
+    proper multi-point sweep.
+  - Pinned regression tests added in `tests/test_mix_engine_formulas.py`
+    for every corrected formula, using the exact live-confirmed
+    value/display pairs above.
+- **`fx_scan_params` crashed on any plugin on at least one install** —
+  `reaper.TrackFX_GetParameterStepCount` isn't a real REAPER API function
+  there (confirmed live: calling it throws "attempt to call a nil value"),
+  so the whole scan crashed before reaching the existing fallback for
+  continuous params. The call is now guarded so a missing function falls
+  through to that fallback instead. Covered by
+  `tests/test_fx_scan_params_lua.py`.
+
 ## [0.8.3] - 2026-10-20
 
 ### Fixed

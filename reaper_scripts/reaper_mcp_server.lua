@@ -1787,7 +1787,14 @@ function fx.fx_scan_params(p)
     local skip = (pname == "-" and orig_val == 0) or is_midi_cc
     if not skip then
       local points
-      local step_count = reaper.TrackFX_GetParameterStepCount(tr, fi, i)
+      -- TrackFX_GetParameterStepCount isn't a real REAPER API function on
+      -- some installs (confirmed live: calling it throws "attempt to call
+      -- a nil value") — guard the call itself so a missing function falls
+      -- through to the existing continuous-sweep path below instead of
+      -- crashing the whole scan.
+      local step_count = reaper.TrackFX_GetParameterStepCount
+          and reaper.TrackFX_GetParameterStepCount(tr, fi, i)
+          or nil
       if step_count and step_count > 0 and step_count <= MAX_STEP_SAMPLES then
         points = {}
         for s = 0, step_count do
