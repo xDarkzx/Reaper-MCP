@@ -4,7 +4,46 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `setup_fx_chain` entries accept `named_config` for plugin state that
+  isn't an automatable param (e.g. `{"BANDENABLED4": "1"}`). Each value is
+  read back and reported in `named_config_set`, because REAPER's setter can
+  return false even when the write works. `engine_master` applies it too.
+
 ### Fixed
+
+- **ReaEQ's high-pass band was never switched on, so every `hp_freq` in
+  every mix profile (and the master's 25Hz rumble filter) had no effect**
+  (issue #44). Band 5 ships disabled and its enable state isn't an
+  automatable param. The EQ builders now switch it on via `named_config`
+  only when there's a real high-pass, and off on the master tonal EQ.
+- **`envelope_add_points`/`envelope_get_points` wrote and read raw
+  envelope values** (issue #44, confirmed live). Volume envelopes use fader
+  scaling, where 0 dB is ~716, so the documented "1.0 = unity" landed near
+  silence. Values now go through the envelope's own scaling mode.
+- **Pan envelopes were mirrored left/right.** REAPER stores pan envelope
+  values negated (measured: a track panned -0.5 seeds its envelope with
+  +0.5); the tools now convert, so -1.0 is hard left as documented.
+- **Creating an envelope reset the track's fader/pan, left a stray point
+  at t=0 and changed the track selection** (issue #44, confirmed live:
+  -7 dB fader jumped to 0 dB). Fader, pan, width and selection are now
+  restored and the seed point removed.
+- **Width and the Pre-FX Volume/Pan/Width envelopes couldn't be created**
+  even though the tools listed them, and the error still said "pass
+  create=true". They can now be created; failures give an accurate error.
+- **`project_set_ripple_mode` ran the wrong actions**: every ID was off by
+  one, so mode 0 turned per-track ripple *on*, and mode 2 ran "Item:
+  Remove selected area of items". It also turned loop-repeat off on every
+  call. Action IDs are now verified against REAPER's own action names.
+- **`item_split_at_transients` never split anything**: action 40310 is
+  "Set ripple editing per-track", not a split, and REAPER has no native
+  split-at-transients action. It now walks the item's transients with
+  "Move cursor to next transient in items" and splits at each, restoring
+  the edit cursor afterwards.
+- **`take_set_reversed` toggled reverse in place** (41051) instead of
+  "Reverse items to new take" (40270) as documented, so calling it twice
+  silently un-reversed the item.
 
 - **The stock-plugin fallback (ReaComp/ReaLimit/ReaEQ, used by `engine_mix`/
   `engine_master` whenever FabFilter isn't installed) wrote several

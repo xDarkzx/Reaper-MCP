@@ -78,6 +78,10 @@ reaper = {
   ScaleToEnvelopeMode = function(mode, v) if mode == 1 then return v * FADER end return v end,
   ScaleFromEnvelopeMode = function(mode, v) if mode == 1 then return v / FADER end return v end,
   InsertEnvelopePoint = function(env, time, value, shape, tension, sel, nosort)
+    -- Measured: inserting into an empty envelope also adds a neutral t=0 point.
+    if #env.points == 0 and time > 0 then
+      env.points[1] = {time = 0, value = (env.mode == 1) and FADER or 0}
+    end
     env.points[#env.points+1] = {time = time, value = value}
   end,
   Envelope_SortPoints = function(env)
@@ -183,3 +187,19 @@ def test_width_create_failure_message():
       return err
     end""")
     assert fn() == "Track envelope 'Width' could not be created."
+
+
+def test_new_envelope_has_no_default_point_before_callers_first_point():
+    rt = _runtime()
+    _add(rt, {"track_index": 0, "envelope_name": "Pan", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 1.0, "value": 0.25})])})
+    assert [t for t, _ in _points(rt, "Pan")] == [1.0]
+
+
+def test_existing_envelope_points_before_batch_are_kept():
+    rt = _runtime()
+    _add(rt, {"track_index": 0, "envelope_name": "Pan", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 0.5, "value": 0.1})])})
+    _add(rt, {"track_index": 0, "envelope_name": "Pan", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 2.0, "value": 0.3})])})
+    assert [t for t, _ in _points(rt, "Pan")] == [0.5, 2.0]

@@ -2377,7 +2377,26 @@ function item.item_split_at_transients(p)
   reaper.Main_OnCommand(40289, 0)  -- Item: Unselect all items
   reaper.SetMediaItemSelected(it, true)
   local count_before = reaper.CountMediaItems(0)
-  reaper.Main_OnCommand(40310, 0)  -- Item: Split items at transients
+
+  -- REAPER has no "split at transients" main action, so walk the item's
+  -- transients with "Item navigation: Move cursor to next transient in
+  -- items" (40375) and split at each. Split right-to-left so `it` stays the
+  -- left part containing every remaining position.
+  local saved_cursor = reaper.GetCursorPosition()
+  reaper.SetEditCurPos(orig_pos, false, false)
+  local positions = {}
+  local last = orig_pos
+  for _ = 1, 10000 do
+    reaper.Main_OnCommand(40375, 0)
+    local pos = reaper.GetCursorPosition()
+    if pos <= last + 1e-6 or pos >= orig_end - 1e-6 then break end
+    positions[#positions+1] = pos
+    last = pos
+  end
+  reaper.SetEditCurPos(saved_cursor, false, false)
+  for i = #positions, 1, -1 do
+    reaper.SplitMediaItem(it, positions[i])
+  end
   local count_after = reaper.CountMediaItems(0)
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
@@ -2560,7 +2579,7 @@ function item.take_set_reversed(p)
   reaper.PreventUIRefresh(1)
   reaper.Main_OnCommand(40289, 0)  -- Unselect all items
   reaper.SetMediaItemSelected(it, true)
-  reaper.Main_OnCommand(41051, 0)  -- Item: Reverse items as new take
+  reaper.Main_OnCommand(40270, 0)  -- Item: Reverse items to new take
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("MCP: take_set_reversed", -1)
@@ -5172,6 +5191,7 @@ local function _resolve_envelope(p)
     if not env then
       return nil, "Track envelope '" .. name .. "' could not be created."
     end
+    return env, nil, true
   end
   if not env then
     return nil, "Track envelope '" .. name .. "' not found. Pass create=true to create it."
@@ -5231,14 +5251,16 @@ function envelope.envelope_get_points(p)
 end
 
 function envelope.envelope_add_points(p)
-  local env, err = _resolve_envelope(p)
+  local env, err, created = _resolve_envelope(p)
   if not env then return nil, err end
   local pts = p.points
   if type(pts) == "string" then pts = json_decode(pts) end
   if type(pts) ~= "table" then return nil, "points must be a JSON array" end
   local added = 0
+  local first_time = nil
   for _, pt in ipairs(pts) do
     if type(pt.time) == "number" and type(pt.value) == "number" then
+      if first_time == nil or pt.time < first_time then first_time = pt.time end
       reaper.InsertEnvelopePoint(
         env, pt.time, _env_value_to_reaper(env, p, pt.value),
         math.floor(pt.shape or 0),
@@ -5249,7 +5271,14 @@ function envelope.envelope_add_points(p)
       added = added + 1
     end
   end
+  -- REAPER gives a new, empty envelope a default point at t=0 (measured:
+  -- neutral value), which would ramp into the caller's first point. On an
+  -- envelope this call created, nothing before the caller's first point is
+  -- theirs.
   reaper.Envelope_SortPoints(env)
+  if created and first_time and first_time > 0 then
+    reaper.DeleteEnvelopePointRange(env, -1, first_time - 1e-6)
+  end
   reaper.UpdateArrange()
   return {success = true, points_added = added}
 end
@@ -5491,14 +5520,14 @@ end
 
 function project.project_set_ripple_mode(p)
   local mode = math.floor(tonumber(p.mode or 0) or 0)
-  -- 0 = off, 1 = per-track, 2 = all tracks
-  reaper.GetSetRepeatEx(0, 0)  -- (unrelated, but we'll use Main_OnCommand)
+  -- 0 = off, 1 = per-track, 2 = all tracks. IDs verified with
+  -- kbd_getTextFromCmd: 40312 is "Item: Remove selected area of items".
   if mode == 0 then
-    reaper.Main_OnCommand(40310, 0)  -- Options: Set ripple editing off (ensures we start from known state)
+    reaper.Main_OnCommand(40309, 0)  -- Set ripple editing off
   elseif mode == 1 then
-    reaper.Main_OnCommand(40311, 0)  -- Options: Set ripple editing per-track
+    reaper.Main_OnCommand(40310, 0)  -- Set ripple editing per-track
   elseif mode == 2 then
-    reaper.Main_OnCommand(40312, 0)  -- Options: Set ripple editing all tracks
+    reaper.Main_OnCommand(40311, 0)  -- Set ripple editing all tracks
   else
     return nil, "mode must be 0 (off), 1 (per-track), or 2 (all tracks)"
   end
@@ -5914,6 +5943,7 @@ local UNDO_POINT_COMMANDS = {
   item_create_midi = true,
   item_duplicate = true,
   item_split_at_positions = true,
+  item_split_at_transients = true,
   items_apply = true,
   midi_delete_all_notes = true,
   midi_delete_cc = true,
@@ -6024,6 +6054,7 @@ local UNDO_ITEM_COMMANDS = {
   item_set_volume = true,
   item_split = true,
   item_split_at_positions = true,
+  item_split_at_transients = true,
   item_take_add = true,
   item_take_delete_active = true,
   item_take_set_active = true,
