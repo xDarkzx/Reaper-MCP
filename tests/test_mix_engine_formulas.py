@@ -14,7 +14,9 @@ from reaper_mcp.mix_engine.plugins import (
     ReaperStockProfile, FabFilterProfile, _db_to_reaverbate_wet,
     _db_to_reaeq_gain, _q_to_reaeq_bw,
 )
-from reaper_mcp.mix_engine.master import _ff_limiter, _stereo_width_fx, _rea_limiter
+from reaper_mcp.mix_engine.master import (
+    _ff_limiter, _stereo_width_fx, _rea_limiter, _rea_subtractive_eq, _rea_tonal_eq,
+)
 from reaper_mcp.mix_engine.profiles_v2 import (
     EQBand, EQProfile, CompProfile, MasteringChain,
 )
@@ -286,3 +288,32 @@ class TestReaEQDroppedBellBand:
         # Only 2 bell slots (band 2/3, indices 3-5 and 6-8) exist regardless.
         assert 3 in entry["params_by_index"]
         assert 6 in entry["params_by_index"]
+
+
+# ───────── regression: ReaEQ high-pass band never enabled (issue #44) ─────────
+#
+# Band 5 ships disabled and its enable flag isn't an automatable param, so
+# writing only its frequency left every hp_freq inaudible (measured: flat
+# response below the set frequency until BANDENABLED4 was switched on).
+
+class TestReaEQHighPassEnabled:
+    def test_hp_band_enabled_when_profile_has_hp(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry({"hp_freq": 100.0})
+        assert entry["named_config"] == {"BANDENABLED4": "1"}
+
+    def test_hp_band_disabled_when_no_hp_requested(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry({"cuts": [], "boosts": []})
+        assert entry["named_config"] == {"BANDENABLED4": "0"}
+
+    def test_hp_at_20hz_counts_as_no_hp(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry({"hp_freq": 20})
+        assert entry["named_config"] == {"BANDENABLED4": "0"}
+
+    def test_master_subtractive_eq_enables_rumble_filter(self):
+        entry = _rea_subtractive_eq(MasteringChain())
+        assert entry["named_config"] == {"BANDENABLED4": "1"}
+
+    def test_master_tonal_eq_disables_hp_band(self):
+        spec = MasteringChain(low_shelf_db=1.0, high_shelf_db=1.0)
+        entry = _rea_tonal_eq(spec)
+        assert entry["named_config"] == {"BANDENABLED4": "0"}

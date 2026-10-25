@@ -97,6 +97,15 @@ def _q_to_proq3(q: float) -> float:
 # ────────────────────────────────────────────────────────────────
 # ReaVerbate helpers
 # ────────────────────────────────────────────────────────────────
+def _reaeq_hp_enable(enabled: bool) -> dict:
+    """named_config for ReaEQ band 5 (0-based "4"), the high-pass band.
+
+    Measured on REAPER 7.82: band 5 exists but is disabled on new ReaEQ
+    instances, so its frequency params alone have no audible effect.
+    """
+    return {"BANDENABLED4": "1" if enabled else "0"}
+
+
 def _db_to_reaverbate_wet(db: float) -> float:
     """Convert dB to ReaVerbate wet param. 0dB=1.0, -6dB≈0.5, roughly linear in dB."""
     # ReaVerbate wet: 1.0 = 0dB, 0.5 ≈ -6dB → linear amplitude
@@ -135,6 +144,10 @@ class ReaperStockProfile:
           Band 3 (Bell):       idx 6,7,8
           Band 4 (High Shelf): idx 9,10,11
           Band 5 (High Pass):  idx 12,13,14
+
+        Band 5 ships disabled, and its enable state isn't an automatable
+        param, so it's switched via named_config (BANDENABLED4) — on only
+        when there's a real high-pass to apply.
         """
         params = {}
 
@@ -218,6 +231,7 @@ class ReaperStockProfile:
         return {
             "name": self.eq_name,
             "params_by_index": params,
+            "named_config": _reaeq_hp_enable(hp_freq > 20),
         }
 
     def compression_fx_chain_entry(self, comp_profile: dict) -> dict:

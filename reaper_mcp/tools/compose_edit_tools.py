@@ -107,6 +107,16 @@ def _validate_fx_chain_item(item, context: str) -> None:
             _validate_fx_param_map(item[key], key, context)
     if item.get("preset") is not None and not isinstance(item["preset"], str):
         raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: preset must be a string")
+    named_config = item.get("named_config")
+    if named_config is not None:
+        if not isinstance(named_config, dict):
+            raise ReaperMCPError(ErrorCode.INVALID_PARAMETER, f"{context}: named_config must be an object")
+        for key, value in named_config.items():
+            if not key.strip() or not isinstance(value, (str, int, float)) or isinstance(value, bool):
+                raise ReaperMCPError(
+                    ErrorCode.INVALID_PARAMETER,
+                    f"{context}: named_config[{key!r}] must be a string or number, got {value!r}",
+                )
 
 
 def _validate_setup_fx_chain_entries(entries) -> None:
@@ -529,6 +539,11 @@ def register(mcp: FastMCP):
                   always are). Skips the per-param name lookup.
                 - `"preset": str` — load a preset by name after params are
                   applied.
+                - `"named_config": {key: value}` — plugin state that isn't
+                  an automatable param, written before params, e.g.
+                  `{"BANDENABLED4": "1"}` to switch on ReaEQ's 5th band.
+                  Each key is read back and reported in `named_config_set`
+                  with `ok` — trust that, not the write.
 
         Every failure is reported per-item in the response's `summary`
         (`{"error": "..."}` on that track or that one param), never a hard

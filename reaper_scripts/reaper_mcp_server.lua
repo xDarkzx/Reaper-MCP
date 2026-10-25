@@ -671,6 +671,27 @@ local function sorted_name_pairs(t)
   end
 end
 
+-- Write plugin named-config values (state that isn't an automatable param,
+-- e.g. ReaEQ's per-band BANDENABLEDx) and report what REAPER reads back.
+-- The setter's return value is not trusted: ReaEQ returns false for
+-- BANDENABLEDx even when the write takes effect, so `ok` comes from the
+-- read-back alone.
+local function apply_named_config(tr, fx_idx, named_config)
+  local results = {}
+  if type(named_config) ~= "table" then return results end
+  if not (reaper.TrackFX_SetNamedConfigParm and reaper.TrackFX_GetNamedConfigParm) then
+    results[#results+1] = {error = "named_config requires REAPER 6.37+"}
+    return results
+  end
+  for key, val in sorted_name_pairs(named_config) do
+    local want = tostring(val)
+    reaper.TrackFX_SetNamedConfigParm(tr, fx_idx, tostring(key), want)
+    local _, got = reaper.TrackFX_GetNamedConfigParm(tr, fx_idx, tostring(key))
+    results[#results+1] = {key = key, requested = want, value = got, ok = (got == want)}
+  end
+  return results
+end
+
 local function build_fx_chain(tr)
   local count = reaper.TrackFX_GetCount(tr)
   local chain = {}
@@ -4363,6 +4384,7 @@ function compose.setup_fx_chain(p)
         end
 
         local params_set = {}
+        local named_config_set = apply_named_config(tr, fx_idx, fx_entry.named_config)
 
         -- Set params by name (fuzzy match)
         if fx_entry.params then
@@ -4438,6 +4460,7 @@ function compose.setup_fx_chain(p)
           name = fx_entry.name,
           fx_index = fx_idx,
           params_set = params_set,
+          named_config_set = named_config_set,
           preset = fx_entry.preset,
         }
 
@@ -4645,6 +4668,8 @@ function compose.setup_master_chain(p)
             goto next_master_fx
           end
 
+          local named_config_set = apply_named_config(master, fx_idx, fx_entry.named_config)
+
           -- Set params by name (fuzzy)
           if fx_entry.params then
             local num_params = reaper.TrackFX_GetNumParams(master, fx_idx)
@@ -4681,7 +4706,8 @@ function compose.setup_master_chain(p)
             reaper.TrackFX_SetNamedConfigParm(master, fx_idx, "renamed_name", tostring(fx_entry.renamed_name))
           end
 
-          results[#results+1] = {name = fx_entry.name, fx_index = fx_idx}
+          results[#results+1] = {name = fx_entry.name, fx_index = fx_idx,
+                                 named_config_set = named_config_set}
           ::next_master_fx::
         end
       end
@@ -5077,6 +5103,45 @@ end
 
 local envelope = {}
 
+-- Action names verified with kbd_getTextFromCmd on REAPER 7.x.
+local ENVELOPE_CREATE_ACTIONS = {
+  ["Volume"] = 40406,           -- Track: Toggle track volume envelope visible
+  ["Pan"] = 40407,              -- Track: Toggle track pan envelope visible
+  ["Mute"] = 40867,             -- Track: Toggle track mute envelope visible
+  ["Volume (Pre-FX)"] = 40408,  -- Track: Toggle track pre-FX volume envelope visible
+  ["Pan (Pre-FX)"] = 40409,     -- Track: Toggle track pre-FX pan envelope visible
+  ["Width"] = 41870,            -- Track: Select width envelope
+  ["Width (Pre-FX)"] = 41869,   -- Track: Select pre-FX width envelope
+}
+
+-- The create actions work on selected tracks and move the fader's current
+-- value into a seed point while resetting the fader (measured: a -7 dB fader
+-- jumps to 0 dB with a point at t=0 holding -7 dB). Undo all of that so the
+-- track sounds the same and only the caller's points end up in the envelope.
+local function _create_track_envelope(tr, name, cmd)
+  local selected = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do
+    selected[#selected+1] = reaper.GetSelectedTrack(0, i)
+  end
+  local vol = reaper.GetMediaTrackInfo_Value(tr, "D_VOL")
+  local pan = reaper.GetMediaTrackInfo_Value(tr, "D_PAN")
+  local width = reaper.GetMediaTrackInfo_Value(tr, "D_WIDTH")
+
+  reaper.SetOnlyTrackSelected(tr)
+  reaper.Main_OnCommand(cmd, 0)
+  local env = reaper.GetTrackEnvelopeByName(tr, name)
+  if env then
+    reaper.DeleteEnvelopePointRange(env, -1, 1e12)
+  end
+
+  reaper.SetMediaTrackInfo_Value(tr, "D_VOL", vol)
+  reaper.SetMediaTrackInfo_Value(tr, "D_PAN", pan)
+  reaper.SetMediaTrackInfo_Value(tr, "D_WIDTH", width)
+  reaper.SetTrackSelected(tr, false)
+  for _, t in ipairs(selected) do reaper.SetTrackSelected(t, true) end
+  return env
+end
+
 local function _resolve_envelope(p)
   local tr = reaper.GetTrack(0, math.floor(p.track_index or -1))
   if not tr then return nil, "Track not found" end
@@ -5099,18 +5164,48 @@ local function _resolve_envelope(p)
   local name = p.envelope_name or "Volume"
   local env = reaper.GetTrackEnvelopeByName(tr, name)
   if not env and p.create then
-    -- REAPER creates volume/pan envelopes via Main_OnCommand on selected track
-    reaper.SetOnlyTrackSelected(tr)
-    if name == "Volume" then reaper.Main_OnCommand(40406, 0)  -- Track: Toggle volume envelope
-    elseif name == "Pan" then reaper.Main_OnCommand(40407, 0)
-    elseif name == "Mute" then reaper.Main_OnCommand(40867, 0)
+    local cmd = ENVELOPE_CREATE_ACTIONS[name]
+    if not cmd then
+      return nil, "Track envelope '" .. name .. "' can't be created by this tool."
     end
-    env = reaper.GetTrackEnvelopeByName(tr, name)
+    env = _create_track_envelope(tr, name, cmd)
+    if not env then
+      return nil, "Track envelope '" .. name .. "' could not be created."
+    end
   end
   if not env then
     return nil, "Track envelope '" .. name .. "' not found. Pass create=true to create it."
   end
   return env, nil
+end
+
+-- Pan envelopes store pan negated (+1 = hard left), unlike D_PAN and this
+-- tool's documented -1 = left. Measured: creating a Pan envelope on a track
+-- panned -0.5 seeds the envelope with +0.5.
+local function _is_track_pan_envelope(p)
+  if p.fx_index ~= nil and p.param_index ~= nil then return false end
+  local name = p.envelope_name or "Volume"
+  return name == "Pan" or name == "Pan (Pre-FX)"
+end
+
+-- Envelope points are stored in the envelope's own scaling mode (Volume
+-- envelopes use fader scaling, where 0 dB is ~716, not 1.0). Convert so the
+-- tool reads and writes its documented units in every mode; mode 0 is a
+-- no-op, so pan/width/mute/FX-param envelopes are unaffected.
+local function _env_value_to_reaper(env, p, v)
+  if _is_track_pan_envelope(p) then v = -v end
+  if reaper.GetEnvelopeScalingMode and reaper.ScaleToEnvelopeMode then
+    v = reaper.ScaleToEnvelopeMode(reaper.GetEnvelopeScalingMode(env), v)
+  end
+  return v
+end
+
+local function _env_value_from_reaper(env, p, v)
+  if reaper.GetEnvelopeScalingMode and reaper.ScaleFromEnvelopeMode then
+    v = reaper.ScaleFromEnvelopeMode(reaper.GetEnvelopeScalingMode(env), v)
+  end
+  if _is_track_pan_envelope(p) then v = -v end
+  return v
 end
 
 function envelope.envelope_get_points(p)
@@ -5123,7 +5218,7 @@ function envelope.envelope_get_points(p)
   for i = 0, returned - 1 do
     local _, time, value, shape, tension, selected = reaper.GetEnvelopePoint(env, i)
     points[#points+1] = {
-      index = i, time = time, value = value,
+      index = i, time = time, value = _env_value_from_reaper(env, p, value),
       shape = shape, tension = tension, selected = selected,
     }
   end
@@ -5145,7 +5240,7 @@ function envelope.envelope_add_points(p)
   for _, pt in ipairs(pts) do
     if type(pt.time) == "number" and type(pt.value) == "number" then
       reaper.InsertEnvelopePoint(
-        env, pt.time, pt.value,
+        env, pt.time, _env_value_to_reaper(env, p, pt.value),
         math.floor(pt.shape or 0),
         pt.tension or 0,
         pt.selected and true or false,
