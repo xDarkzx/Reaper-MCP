@@ -26,7 +26,7 @@ from reaper_mcp.mix_engine.profiles_v2 import (
 )
 from reaper_mcp.mix_engine.plugins import (
     ReaperStockProfile, _hz_to_reaeq, _db_to_reaeq_gain, _q_to_reaeq_bw,
-    _reaeq_hp_enable,
+    _reaeq_hp_enable, _REAEQ_TYPE_LOW_SHELF, _REAEQ_TYPE_HIGH_SHELF, _REAEQ_TYPE_HP,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ def _rea_subtractive_eq(spec: MasteringChain) -> dict:
     db_to_reaeq was linear where the real scale is exponential.
     """
     params = {
-        # Band 5 = high-pass
+        # Band 5 = high-pass (type/enable set via named_config below)
         12: _hz_to_reaeq(25),        # HP at 25Hz for subsonic
         13: _db_to_reaeq_gain(0.0),
         14: 0.7,
@@ -128,7 +128,7 @@ def _rea_subtractive_eq(spec: MasteringChain) -> dict:
         10: _db_to_reaeq_gain(0.0),
     }
     return {"name": "ReaEQ", "params_by_index": params,
-            "named_config": _reaeq_hp_enable(True)}
+            "named_config": {**_reaeq_hp_enable(True), "BANDTYPE4": _REAEQ_TYPE_HP}}
 
 
 def _rea_tonal_eq(spec: MasteringChain) -> dict:
@@ -154,7 +154,9 @@ def _rea_tonal_eq(spec: MasteringChain) -> dict:
         13: _db_to_reaeq_gain(0.0),
     }
     return {"name": "ReaEQ", "params_by_index": params,
-            "named_config": _reaeq_hp_enable(False)}
+            "named_config": {**_reaeq_hp_enable(False),
+                             "BANDTYPE0": _REAEQ_TYPE_LOW_SHELF, "BANDENABLED0": "1",
+                             "BANDTYPE3": _REAEQ_TYPE_HIGH_SHELF, "BANDENABLED3": "1"}}
 
 
 def _rea_bus_comp(comp: CompProfile) -> dict:

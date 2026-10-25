@@ -44,6 +44,18 @@ All notable changes to ReaperMCP will be documented in this file.
 - **`take_set_reversed` toggled reverse in place** (41051) instead of
   "Reverse items to new take" (40270) as documented, so calling it twice
   silently un-reversed the item.
+- **The stock EQ dropped bell bands: 124 of the catalog's 375 roles lost
+  at least one** (e.g. alt_rock's lead-vocal +2dB presence boost at 4kHz).
+  Only ReaEQ bands 2/3 took bells, on the wrong belief that bands 1/4 are
+  fixed shelves. They switch to bells via `BANDTYPEx` (confirmed live), so
+  bells now use any band a shelf doesn't need, and no catalog role loses a
+  band. Band type and enable are written explicitly for every band used, so
+  a custom ReaEQ default preset can't change the result.
+- **ReaVerbate width was written on the wrong scale.** Its Width param runs
+  -1.00..+1.00 (0.5 = mono), so the "room" bus's 0.8 width landed at 0.60,
+  and 0.0 would have inverted the stereo image. Now `(width + 1) / 2`.
+  Room size, previously flagged as non-linear, was swept and is linear
+  (30..98), so it was already correct.
 
 - **The stock-plugin fallback (ReaComp/ReaLimit/ReaEQ, used by `engine_mix`/
   `engine_master` whenever FabFilter isn't installed) wrote several

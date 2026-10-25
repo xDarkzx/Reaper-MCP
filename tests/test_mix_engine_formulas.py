@@ -12,7 +12,7 @@ import pytest
 
 from reaper_mcp.mix_engine.plugins import (
     ReaperStockProfile, FabFilterProfile, _db_to_reaverbate_wet,
-    _db_to_reaeq_gain, _q_to_reaeq_bw,
+    _db_to_reaeq_gain, _q_to_reaeq_bw, _hz_to_reaeq, _width_to_reaverbate,
 )
 from reaper_mcp.mix_engine.master import (
     _ff_limiter, _stereo_width_fx, _rea_limiter, _rea_subtractive_eq, _rea_tonal_eq,
@@ -271,23 +271,87 @@ class TestReaEQBandwidthDirection:
         assert _q_to_reaeq_bw(0.7) == pytest.approx(1.9178 / 4.0, abs=0.001)
 
 
-class TestReaEQDroppedBellBand:
-    def test_third_bell_band_is_reported_not_silently_dropped(self, caplog):
+def _bell(freq, gain=1.0):
+    return {"freq": freq, "gain_db": gain, "q": 1.0, "shape": "bell"}
+
+
+class TestReaEQBellSlots:
+    """Bands 1/4 default to shelves but become bells via BANDTYPEx=8 (measured
+    live: param names change to "Freq-Band 1"/"Freq-Band 4"). Previously only
+    bands 2/3 took bells, so 124 of 375 catalog roles lost EQ bands."""
+
+    def test_three_bells_fit_using_band_1(self, caplog):
         import logging
-        profile = {
-            "hp_freq": 100.0,
-            "cuts": [{"freq": 300, "gain_db": -2.0, "q": 1.2, "shape": "bell"}],
-            "boosts": [
-                {"freq": 1000, "gain_db": 1.0, "q": 1.0, "shape": "bell"},
-                {"freq": 4000, "gain_db": 2.0, "q": 1.2, "shape": "bell"},
-            ],
-        }
+        profile = {"hp_freq": 100.0, "cuts": [_bell(300, -2.0)],
+                   "boosts": [_bell(1000), _bell(4000, 2.0)]}
         with caplog.at_level(logging.WARNING):
             entry = ReaperStockProfile().eq_fx_chain_entry(profile)
-        assert "4000" in caplog.text or "dropping" in caplog.text.lower()
-        # Only 2 bell slots (band 2/3, indices 3-5 and 6-8) exist regardless.
-        assert 3 in entry["params_by_index"]
-        assert 6 in entry["params_by_index"]
+        assert "dropping" not in caplog.text.lower()
+        p, nc = entry["params_by_index"], entry["named_config"]
+        assert nc["BANDTYPE0"] == "8" and nc["BANDENABLED0"] == "1"
+        assert p[0] == pytest.approx(_hz_to_reaeq(300))   # lowest bell -> band 1
+        assert p[3] == pytest.approx(_hz_to_reaeq(1000))
+        assert p[6] == pytest.approx(_hz_to_reaeq(4000))
+        assert p[10] == pytest.approx(0.25)                # band 4 unused -> 0dB
+
+    def test_four_bells_fill_every_slot(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry(
+            {"boosts": [_bell(5000), _bell(200), _bell(800), _bell(2000)]})
+        p, nc = entry["params_by_index"], entry["named_config"]
+        assert [nc[f"BANDTYPE{i}"] for i in range(4)] == ["8", "8", "8", "8"]
+        assert [p[i * 3] for i in range(4)] == pytest.approx(
+            [_hz_to_reaeq(f) for f in (200, 800, 2000, 5000)])
+
+    def test_shelves_keep_bands_1_and_4(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry({"boosts": [
+            {"freq": 80, "gain_db": 2.0, "shape": "low_shelf"},
+            {"freq": 10000, "gain_db": 1.0, "shape": "high_shelf"},
+            _bell(500), _bell(3000)]})
+        nc = entry["named_config"]
+        assert nc["BANDTYPE0"] == "0" and nc["BANDTYPE3"] == "1"
+        assert nc["BANDTYPE1"] == "8" and nc["BANDTYPE2"] == "8"
+
+    def test_fifth_bell_is_reported_not_silently_dropped(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            ReaperStockProfile().eq_fx_chain_entry(
+                {"boosts": [_bell(f) for f in (100, 300, 1000, 3000, 8000)]})
+        assert "8000" in caplog.text
+
+    def test_hp_band_type_is_set_explicitly(self):
+        entry = ReaperStockProfile().eq_fx_chain_entry({"hp_freq": 80.0})
+        assert entry["named_config"]["BANDTYPE4"] == "4"
+
+    def test_no_catalog_role_loses_bands(self, caplog):
+        import logging
+        import reaper_mcp.mix_engine.catalog  # noqa: F401  (registers styles)
+        from reaper_mcp.mix_engine.profiles_v2 import list_profiles, get_profile
+        with caplog.at_level(logging.WARNING):
+            for style in list_profiles():
+                for role in get_profile(style).instrument_roles.values():
+                    ReaperStockProfile().eq_fx_chain_entry(role.eq.to_legacy_dict())
+        assert "dropping" not in caplog.text.lower()
+
+
+class TestReaVerbateScales:
+    """From a 9-point fx_scan_params sweep of ReaVerbate on REAPER 7.x."""
+
+    def test_width_maps_onto_minus_one_to_plus_one_scale(self):
+        # Width reads -1.00 at 0.0, 0.00 (mono) at 0.5, +1.00 at 1.0.
+        assert _width_to_reaverbate(1.0) == pytest.approx(1.0)
+        assert _width_to_reaverbate(0.8) == pytest.approx(0.9)   # was 0.8 -> "0.60"
+        assert _width_to_reaverbate(0.0) == pytest.approx(0.5)   # mono, not inverted
+
+    def test_reverb_entry_uses_width_conversion(self):
+        entry = ReaperStockProfile().reverb_fx_chain_entry({"width": 0.8})
+        assert entry["params_by_index"][4] == pytest.approx(0.9)
+
+    def test_room_size_and_dampening_pass_straight_through(self):
+        # Both are linear across the param (room size 30..98, dampening 0..100).
+        entry = ReaperStockProfile().reverb_fx_chain_entry(
+            {"room_size": 0.75, "dampening": 0.4})
+        assert entry["params_by_index"][2] == 0.75
+        assert entry["params_by_index"][3] == 0.4
 
 
 # ───────── regression: ReaEQ high-pass band never enabled (issue #44) ─────────
@@ -299,21 +363,21 @@ class TestReaEQDroppedBellBand:
 class TestReaEQHighPassEnabled:
     def test_hp_band_enabled_when_profile_has_hp(self):
         entry = ReaperStockProfile().eq_fx_chain_entry({"hp_freq": 100.0})
-        assert entry["named_config"] == {"BANDENABLED4": "1"}
+        assert entry["named_config"]["BANDENABLED4"] == "1"
 
     def test_hp_band_disabled_when_no_hp_requested(self):
         entry = ReaperStockProfile().eq_fx_chain_entry({"cuts": [], "boosts": []})
-        assert entry["named_config"] == {"BANDENABLED4": "0"}
+        assert entry["named_config"]["BANDENABLED4"] == "0"
 
     def test_hp_at_20hz_counts_as_no_hp(self):
         entry = ReaperStockProfile().eq_fx_chain_entry({"hp_freq": 20})
-        assert entry["named_config"] == {"BANDENABLED4": "0"}
+        assert entry["named_config"]["BANDENABLED4"] == "0"
 
     def test_master_subtractive_eq_enables_rumble_filter(self):
         entry = _rea_subtractive_eq(MasteringChain())
-        assert entry["named_config"] == {"BANDENABLED4": "1"}
+        assert entry["named_config"]["BANDENABLED4"] == "1"
 
     def test_master_tonal_eq_disables_hp_band(self):
         spec = MasteringChain(low_shelf_db=1.0, high_shelf_db=1.0)
         entry = _rea_tonal_eq(spec)
-        assert entry["named_config"] == {"BANDENABLED4": "0"}
+        assert entry["named_config"]["BANDENABLED4"] == "0"
