@@ -11,6 +11,13 @@ All notable changes to ReaperMCP will be documented in this file.
   read back and reported in `named_config_set`, because REAPER's setter can
   return false even when the write works. `engine_master` applies it too.
 
+### Changed
+
+- **A saved FX preference is never overridden.** Choosing ReaEQ / ReaComp /
+  ReaVerbate / ReaLimit for a category now uses it even with FabFilter
+  installed (previously the engine silently swapped it for FabFilter). With
+  no preference, the engine still picks the best installed plugin.
+
 ### Fixed
 
 - **ReaEQ's high-pass band was never switched on, so every `hp_freq` in

@@ -113,12 +113,21 @@ async def test_with_only_stock_plugins_everything_is_stock(prefs):
 
 
 @pytest.mark.asyncio
-async def test_stock_is_never_used_while_a_third_party_plugin_is_installed(prefs):
-    """REAPER's own plugins are a last resort, even when a preference names one."""
+async def test_a_stock_preference_wins_even_with_fabfilter_installed(prefs):
+    """The user's choice is never overridden: ReaEQ chosen means ReaEQ, and
+    only that category changes; the rest still auto-pick FabFilter."""
     prefs({"eq": "VST: ReaEQ (Cockos)"})
     selection = await select_plugins(_FakeClient(FABFILTER_INSTALLED + STOCK_INSTALLED))
-    assert all(selection.family(c) == FAB for c in ENGINE_CATEGORIES)
-    assert "REAPER stock" in selection.ignored_preferences["eq"]
+    assert selection.family("eq") == STOCK
+    assert all(selection.family(c) == FAB for c in ENGINE_CATEGORIES if c != "eq")
+    assert not selection.ignored_preferences
+
+
+@pytest.mark.asyncio
+async def test_all_stock_preferences_give_a_fully_stock_engine(prefs):
+    prefs(dict(zip(ENGINE_CATEGORIES, STOCK_INSTALLED)))
+    selection = await select_plugins(_FakeClient(FABFILTER_INSTALLED + STOCK_INSTALLED))
+    assert all(selection.family(c) == STOCK for c in ENGINE_CATEGORIES)
 
 
 @pytest.mark.asyncio
@@ -255,7 +264,7 @@ def test_setting_preferences_reports_what_the_engine_can_drive():
         "deesser": "Some De-esser",
     })
     assert report["eq"]["supported"] is True and report["eq"]["family"] == "reaper_stock"
-    assert "only used when no supported third-party" in report["eq"]["note"]
+    assert "even if a third-party plugin is installed" in report["eq"]["note"]
     assert report["compressor"]["supported"] is False
     assert "parameter map" in report["compressor"]["note"]
     assert report["deesser"]["supported"] is False
