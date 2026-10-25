@@ -97,6 +97,9 @@ async def run_fix_mix(client, style: str = "", include_master: bool = True) -> d
         from reaper_mcp.mix_engine.profiles_v2 import resolve_roles
         role_map = resolve_roles(style_profile, live_tracks)
 
+    from reaper_mcp.mix_engine import _tag_mix_fx
+    from reaper_mcp.mix_engine.profiles_v2 import is_bus_track
+
     # Select the plugin family per category (for the EQ plugin name)
     selection = await select_plugins(client)
     plugin_profile = get_plugin_profile_for(selection)
@@ -111,7 +114,7 @@ async def run_fix_mix(client, style: str = "", include_master: bool = True) -> d
         if not name:
             continue  # skip unnamed tracks
         # Skip any MIX:* bus tracks we might have created
-        if name.startswith("MIX:") or name.startswith("FIX:"):
+        if name.startswith("MIX:") or name.startswith("FIX:") or is_bus_track(track):
             continue
 
         role = role_map.get(ti)
@@ -122,7 +125,7 @@ async def run_fix_mix(client, style: str = "", include_master: bool = True) -> d
         if eq_profile is None:
             continue
 
-        fx_entry = plugin_profile.eq_fx_chain_entry(eq_profile)
+        fx_entry = _tag_mix_fx(plugin_profile.eq_fx_chain_entry(eq_profile))
         tracks_with_eq.append({"track_index": ti, "fx_chain": [fx_entry]})
 
     if tracks_with_eq:
@@ -212,7 +215,8 @@ async def _apply_emergency_master(client, style_profile, selection) -> dict:
             ),
         )
 
-    fx_chain = _build_master_fx_chain(spec, selection)
+    from reaper_mcp.mix_engine import _tag_mix_fx
+    fx_chain = [_tag_mix_fx(e) for e in _build_master_fx_chain(spec, selection)]
     result = await client.execute(
         "setup_master_chain",
         fx_chain=json.dumps(fx_chain),

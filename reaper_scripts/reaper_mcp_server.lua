@@ -4639,37 +4639,15 @@ function compose.setup_master_chain(p)
   local ok, cleared_or_err, fx_results = pcall(function()
     local cleared = 0
     if p.clean then
-      local clear_names = p.clean_names
-      if type(clear_names) == "string" then clear_names = json_decode(clear_names) end
-      clear_names = clear_names or {"ReaEQ", "ReaComp", "ReaLimit",
-                                     "FabFilter Pro-Q 3", "FabFilter Pro-C 2",
-                                     "FabFilter Pro-L", "FabFilter Pro-L 2"}
-      -- First pass: remove any FX tagged by the mix engine with the
-      -- "[MIX] " prefix. Safe — we know we added these.
+      -- Remove only FX the mix engine tagged with the "[MIX] " prefix. No
+      -- name-matching fallback: it used to delete a user's own FabFilter /
+      -- Rea* master chain whenever no tagged FX were present.
       local num_fx = reaper.TrackFX_GetCount(master)
-      local any_tagged = false
       for fi = num_fx - 1, 0, -1 do
         local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
         if fn:sub(1, 6) == "[MIX] " then
           reaper.TrackFX_Delete(master, fi)
           cleared = cleared + 1
-          any_tagged = true
-        end
-      end
-      -- Fallback — only if we found NO tagged FX, fall back to name-substring
-      -- matching for backward compat with projects from before the prefix
-      -- system. New projects rely on the tagged pass above exclusively.
-      if not any_tagged then
-        num_fx = reaper.TrackFX_GetCount(master)
-        for fi = num_fx - 1, 0, -1 do
-          local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
-          for _, cname in ipairs(clear_names) do
-            if fn:find(cname, 1, true) then
-              reaper.TrackFX_Delete(master, fi)
-              cleared = cleared + 1
-              break
-            end
-          end
         end
       end
     end

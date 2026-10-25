@@ -56,6 +56,22 @@ All notable changes to ReaperMCP will be documented in this file.
   and 0.0 would have inverted the stereo image. Now `(width + 1) / 2`.
   Room size, previously flagged as non-linear, was swept and is linear
   (30..98), so it was already correct.
+- **`engine_master`/`engine_mix` with `clean=True` could delete the user's
+  own FX.** When no `[MIX] `-tagged FX were present, both fell back to
+  removing anything named like ReaEQ / ReaComp / ReaLimit / Pro-Q 3 /
+  Pro-C 2 / Pro-L, so a hand-built FabFilter master chain was wiped. Clean
+  now removes only FX the engine tagged itself.
+- **`engine_fix_mix` added untagged FX** (it relied on that fallback to
+  replace its own chain); its track EQ and master chain are now tagged.
+- **Bus and FX-return tracks got instrument processing**: a return named
+  "Plate Reverb (Vocals)" was given lead-vocal EQ/compression by
+  `engine_mix`, and `engine_fix_mix` EQ'd every return. Tracks with no media
+  that receive sends are now skipped.
+- **Plain stem names matched no role**: "Guitar" and "Bass" were unmatched
+  in every rock style (only "gtr"/"bass gtr" were aliases), and similar gaps
+  existed across families. A track the style's aliases miss now falls back
+  to common names (guitar, bass, vocal, piano, keys, strings, pad, lead,
+  horns), only ever onto a role that style actually has.
 
 - **The stock-plugin fallback (ReaComp/ReaLimit/ReaEQ, used by `engine_mix`/
   `engine_master` whenever FabFilter isn't installed) wrote several
