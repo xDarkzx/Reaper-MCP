@@ -4,6 +4,8 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-26
+
 ### Added
 
 - `setup_fx_chain` entries accept `named_config` for plugin state that
@@ -146,10 +148,6 @@ All notable changes to ReaperMCP will be documented in this file.
   continuous params. The call is now guarded so a missing function falls
   through to that fallback instead. Covered by
   `tests/test_fx_scan_params_lua.py`.
-
-## [0.8.3] - 2026-10-20
-
-### Fixed
 
 - **`track_set_input(input_index=-1)` cleared the track's input instead of
   selecting all MIDI inputs.** The tool documents and accepts `-1` as "MIDI
