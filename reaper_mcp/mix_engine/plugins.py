@@ -94,9 +94,31 @@ def _q_to_proq3(q: float) -> float:
     return math.log(q / 0.025) / _PROQ3_LOG_1600
 
 
+# ReaEQ band types (BANDTYPEx named config), read back live from REAPER 7.x.
+_REAEQ_TYPE_LOW_SHELF = "0"
+_REAEQ_TYPE_HIGH_SHELF = "1"
+_REAEQ_TYPE_HP = "4"
+_REAEQ_TYPE_BAND = "8"
+
+
+def _reaeq_hp_enable(enabled: bool) -> dict:
+    """named_config for ReaEQ band 5 (0-based "4"), the high-pass band.
+
+    Measured on REAPER 7.82: band 5 exists but is disabled on new ReaEQ
+    instances, so its frequency params alone have no audible effect.
+    """
+    return {"BANDENABLED4": "1" if enabled else "0"}
+
+
 # ────────────────────────────────────────────────────────────────
 # ReaVerbate helpers
 # ────────────────────────────────────────────────────────────────
+def _width_to_reaverbate(width: float) -> float:
+    """ReaVerbate Width is -1.00..+1.00 across 0..1 (measured: 0.5 = 0.00,
+    i.e. mono), so a 0..1 width needs (w + 1) / 2, not a pass-through."""
+    return max(0.0, min(1.0, (width + 1.0) / 2.0))
+
+
 def _db_to_reaverbate_wet(db: float) -> float:
     """Convert dB to ReaVerbate wet param. 0dB=1.0, -6dB≈0.5, roughly linear in dB."""
     # ReaVerbate wet: 1.0 = 0dB, 0.5 ≈ -6dB → linear amplitude
@@ -129,12 +151,18 @@ class ReaperStockProfile:
     def eq_fx_chain_entry(self, eq_profile: dict) -> dict:
         """Build an fx_chain entry for ReaEQ from an EQ profile dict.
 
-        ReaEQ has 4 default bands + we use band 5 as high-pass:
-          Band 1 (Low Shelf):  idx 0,1,2  — freq, gain, bw
-          Band 2 (Bell):       idx 3,4,5
-          Band 3 (Bell):       idx 6,7,8
-          Band 4 (High Shelf): idx 9,10,11
-          Band 5 (High Pass):  idx 12,13,14
+        ReaEQ's 5 default bands, 3 params each (freq, gain, bw):
+          Band 1: idx 0,1,2    (default Low Shelf)
+          Band 2: idx 3,4,5    (default Bell)
+          Band 3: idx 6,7,8    (default Bell)
+          Band 4: idx 9,10,11  (default High Shelf)
+          Band 5: idx 12,13,14 (default High Pass, disabled)
+
+        Band type and enable state aren't automatable params, so they go via
+        named_config (BANDTYPEx / BANDENABLEDx). Type codes measured live:
+        0 = Low Shelf, 1 = High Shelf, 4 = High Pass, 8 = Band (bell).
+        Bands 1/4 switch to bells when no shelf needs them, so up to 4 bells
+        fit. Band 5 is enabled only for a real high-pass.
         """
         params = {}
 
@@ -143,6 +171,8 @@ class ReaperStockProfile:
         params[12] = _hz_to_reaeq(hp_freq)      # freq
         params[13] = _db_to_reaeq_gain(0.0)      # gain (0dB, HP uses slope not gain)
         params[14] = 0.7                          # steep Q for HP
+        named_config = _reaeq_hp_enable(hp_freq > 20)
+        named_config["BANDTYPE4"] = _REAEQ_TYPE_HP
 
         # Collect all EQ bands (cuts + boosts)
         all_bands = []
@@ -151,8 +181,6 @@ class ReaperStockProfile:
         for boost in eq_profile.get("boosts", []):
             all_bands.append(boost)
 
-        # Map up to 4 bands to ReaEQ's 4 slots
-        # Slot assignment: low_shelf → band1, high_shelf → band4, bells → band2/3
         low_shelf_band = None
         high_shelf_band = None
         bell_bands = []
@@ -166,58 +194,42 @@ class ReaperStockProfile:
             else:
                 bell_bands.append(band)
 
-        # Band 1 — Low Shelf
+        def write_band(slot, band, band_type, default_q):
+            base = slot * 3
+            params[base] = _hz_to_reaeq(band["freq"])
+            params[base + 1] = _db_to_reaeq_gain(band["gain_db"])
+            params[base + 2] = _q_to_reaeq_bw(band.get("q", default_q))
+            named_config[f"BANDTYPE{slot}"] = band_type
+            named_config[f"BANDENABLED{slot}"] = "1"
+
+        bell_slots = [1, 2]
         if low_shelf_band:
-            params[0] = _hz_to_reaeq(low_shelf_band["freq"])
-            params[1] = _db_to_reaeq_gain(low_shelf_band["gain_db"])
-            params[2] = _q_to_reaeq_bw(low_shelf_band.get("q", 0.8))
+            write_band(0, low_shelf_band, _REAEQ_TYPE_LOW_SHELF, 0.8)
         else:
-            # Disable band 1 (0 gain)
-            params[1] = _db_to_reaeq_gain(0.0)
-
-        # Band 2 — first bell
-        if len(bell_bands) >= 1:
-            b = bell_bands[0]
-            params[3] = _hz_to_reaeq(b["freq"])
-            params[4] = _db_to_reaeq_gain(b["gain_db"])
-            params[5] = _q_to_reaeq_bw(b.get("q", 1.0))
-        else:
-            params[4] = _db_to_reaeq_gain(0.0)
-
-        # Band 3 — second bell
-        if len(bell_bands) >= 2:
-            b = bell_bands[1]
-            params[6] = _hz_to_reaeq(b["freq"])
-            params[7] = _db_to_reaeq_gain(b["gain_db"])
-            params[8] = _q_to_reaeq_bw(b.get("q", 1.0))
-        else:
-            params[7] = _db_to_reaeq_gain(0.0)
-
-        # Band 4 — High Shelf
+            bell_slots.insert(0, 0)
         if high_shelf_band:
-            params[9] = _hz_to_reaeq(high_shelf_band["freq"])
-            params[10] = _db_to_reaeq_gain(high_shelf_band["gain_db"])
-            params[11] = _q_to_reaeq_bw(high_shelf_band.get("q", 0.8))
+            write_band(3, high_shelf_band, _REAEQ_TYPE_HIGH_SHELF, 0.8)
         else:
-            params[10] = _db_to_reaeq_gain(0.0)
+            bell_slots.append(3)
 
-        # ReaEQ only has 2 generic (bell-shaped) slots (band 2/3) — band 1
-        # and band 4 are hard-wired to Low Shelf / High Shelf in the plugin
-        # itself (confirmed live: their REAPER param names are literally
-        # "Freq-Low Shelf" / "Freq-High Shelf 4", not a switchable type), so
-        # a 3rd+ bell can't be placed without silently becoming a shelf.
-        # Report it instead of dropping it with no trace.
-        if len(bell_bands) > 2:
-            dropped = bell_bands[2:]
+        bell_bands.sort(key=lambda b: b["freq"])
+        for slot, band in zip(bell_slots, bell_bands):
+            write_band(slot, band, _REAEQ_TYPE_BAND, 1.0)
+        for slot in bell_slots[len(bell_bands):]:
+            params[slot * 3 + 1] = _db_to_reaeq_gain(0.0)  # unused slot: 0dB
+
+        if len(bell_bands) > len(bell_slots):
+            dropped = bell_bands[len(bell_slots):]
             logger.warning(
-                "ReaEQ only has 2 bell slots; dropping %d band(s) that don't fit: %s",
-                len(dropped),
+                "ReaEQ has %d bell slot(s) left after shelves; dropping %d band(s): %s",
+                len(bell_slots), len(dropped),
                 ", ".join(f"{b['freq']}Hz {b['gain_db']:+.1f}dB" for b in dropped),
             )
 
         return {
             "name": self.eq_name,
             "params_by_index": params,
+            "named_config": named_config,
         }
 
     def compression_fx_chain_entry(self, comp_profile: dict) -> dict:
@@ -290,20 +302,12 @@ class ReaperStockProfile:
                 # double the level. Was previously 1.0 (bug), causing ~3dB
                 # too-loud reverb returns.
                 1: 0.0,
-                # KNOWN GAP (checked live, not yet fixed): "room_size" is
-                # passed straight through assuming a 1:1 normalized scale,
-                # but the real plugin's curve isn't linear — confirmed via
-                # fx_get_params read-back: 0.25->"47", 0.5->"64", 0.75->"81",
-                # 1.0->"98", not a clean sqrt/log fit either from those
-                # points. "dampening" IS a clean 1:1 pass-through (0.5->"50"
-                # exactly), confirmed the same way. Needs a proper multi-point
-                # sweep (fx_scan_params, once its crash on ReaComp/ReaLimit is
-                # fixed) rather than a guessed curve. Lower severity than the
-                # ReaComp/ReaLimit/ReaEQ bugs — the reverb's "size" feel is
-                # off, not broken or silent.
+                # Room size and dampening are linear across the param
+                # (9-point fx_scan_params sweep: room size reads 30..98,
+                # dampening 0..100), so 0..1 passes straight through.
                 2: reverb_config.get("room_size", 0.5),
                 3: reverb_config.get("dampening", 0.5),
-                4: reverb_config.get("width", 1.0),
+                4: _width_to_reaverbate(reverb_config.get("width", 1.0)),
                 5: 0.0,  # delay = 0ms
                 6: _hz_to_reaverbate_lp(reverb_config.get("lowpass_hz", 20000)),
                 7: _hz_to_reaverbate_hp(reverb_config.get("hipass_hz", 0)),

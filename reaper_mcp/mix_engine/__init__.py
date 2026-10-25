@@ -34,13 +34,6 @@ _MIX_FX_PREFIX = "[MIX] "
 # Names used to identify mix-engine-created tracks/FX for cleanup
 _REVERB_BUS_PREFIX = "MIX:"
 
-# Backward-compat fallback list — used only if we can't find any
-# prefix-tagged FX on a track. Projects from before the prefix system
-# (or REAPER < 6.37) fall through to substring matching.
-_MIX_EQ_NAMES = {"ReaEQ", "FabFilter Pro-Q 3"}
-_MIX_COMPRESSOR_NAMES = {"ReaComp", "FabFilter Pro-C 2"}
-_MIX_REVERB_NAMES = {"ReaVerbate", "FabFilter Pro-R"}
-
 
 def _tag_mix_fx(entry: dict) -> dict:
     """Return a copy of an fx_chain entry with `renamed_name` set to
@@ -367,13 +360,11 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
     """Remove previously-added mix EQ/compressor from the given tracks and
     delete MIX:* reverb buses.
 
-    Primary match: FX whose display name starts with the "[MIX] " prefix —
-    these are FX the mix engine added itself via setup_fx_chain's
-    `renamed_name` field, so removing them never touches user-added FX.
-
-    Fallback (only if no tagged FX found on a track): match common mix
-    plugin names by substring. This handles projects from before the
-    prefix system or REAPER versions without TrackFX_SetNamedConfigParm.
+    Only FX whose display name starts with the "[MIX] " prefix are removed —
+    FX the mix engine added itself via setup_fx_chain's `renamed_name`
+    field. There is deliberately no name-matching fallback: it used to
+    delete a user's own Pro-Q 3 / Pro-C 2 / ReaEQ on any track with no
+    tagged FX.
 
     Operation is scoped to `track_indices` (tracks the mix engine is
     currently processing), so user FX on other tracks is never touched.
@@ -385,31 +376,12 @@ async def _clean_mix_fx_generic(client, track_indices: list[int]) -> None:
             data = chain_result.get("data", chain_result)
             fx_chain = data.get("fx_chain", [])
 
-            # Primary pass — remove anything we tagged with [MIX].
             tagged = [fx for fx in fx_chain if fx.get("name", "").startswith(_MIX_FX_PREFIX)]
-            any_tagged = bool(tagged)
             if tagged:
                 await _remove_fx_indices(client, ti, [fx["index"] for fx in tagged])
                 for fx in tagged:
                     logger.info("Cleanup: removed tagged %r from track %d", fx.get("name", ""), ti)
                 removed += len(tagged)
-
-            # Fallback pass — only if no tagged FX were found. Preserves
-            # old-project behaviour but is less safe (can match user FX).
-            if not any_tagged:
-                chain_result = await client.execute("fx_get_chain", track_index=ti)
-                data = chain_result.get("data", chain_result)
-                fx_chain = data.get("fx_chain", [])
-                mix_names = _MIX_EQ_NAMES | _MIX_COMPRESSOR_NAMES
-                matched = [
-                    fx for fx in fx_chain
-                    if any(name in fx.get("name", "") for name in mix_names)
-                ]
-                if matched:
-                    await _remove_fx_indices(client, ti, [fx["index"] for fx in matched])
-                    for fx in matched:
-                        logger.info("Cleanup (fallback): removed %r from track %d", fx.get("name", ""), ti)
-                    removed += len(matched)
         except Exception as e:
             logger.warning("Could not clean FX on track %d: %s", ti, e)
 

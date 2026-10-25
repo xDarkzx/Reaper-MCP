@@ -157,3 +157,25 @@ def test_param_count_per_item_is_capped():
 def test_fx_per_track_is_capped():
     chain = [{"name": "ReaEQ"}] * 51
     _bad([{"track_index": 0, "fx_chain": chain}], ErrorCode.VALUE_OUT_OF_RANGE)
+
+
+# ---- named_config (issue #44) ----------------------------------------------
+
+def test_named_config_is_accepted():
+    _ok([{"track_index": 0, "fx_chain": [
+        {"name": "ReaEQ", "named_config": {"BANDENABLED4": "1"}},
+    ]}])
+
+
+def test_named_config_must_be_an_object():
+    msg = _bad([{"track_index": 0, "fx_chain": [
+        {"name": "ReaEQ", "named_config": ["BANDENABLED4", "1"]},
+    ]}], ErrorCode.INVALID_PARAMETER)
+    assert "named_config" in msg
+
+
+def test_named_config_values_must_be_scalars():
+    msg = _bad([{"track_index": 0, "fx_chain": [
+        {"name": "ReaEQ", "named_config": {"BANDENABLED4": {"on": True}}},
+    ]}], ErrorCode.INVALID_PARAMETER)
+    assert "BANDENABLED4" in msg

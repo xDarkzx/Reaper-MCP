@@ -26,6 +26,7 @@ from reaper_mcp.mix_engine.profiles_v2 import (
 )
 from reaper_mcp.mix_engine.plugins import (
     ReaperStockProfile, _hz_to_reaeq, _db_to_reaeq_gain, _q_to_reaeq_bw,
+    _reaeq_hp_enable, _REAEQ_TYPE_LOW_SHELF, _REAEQ_TYPE_HIGH_SHELF, _REAEQ_TYPE_HP,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ def _rea_subtractive_eq(spec: MasteringChain) -> dict:
     db_to_reaeq was linear where the real scale is exponential.
     """
     params = {
-        # Band 5 = high-pass
+        # Band 5 = high-pass (type/enable set via named_config below)
         12: _hz_to_reaeq(25),        # HP at 25Hz for subsonic
         13: _db_to_reaeq_gain(0.0),
         14: 0.7,
@@ -126,20 +127,16 @@ def _rea_subtractive_eq(spec: MasteringChain) -> dict:
         7: _db_to_reaeq_gain(0.0),
         10: _db_to_reaeq_gain(0.0),
     }
-    return {"name": "ReaEQ", "params_by_index": params}
+    return {"name": "ReaEQ", "params_by_index": params,
+            "named_config": {**_reaeq_hp_enable(True), "BANDTYPE4": _REAEQ_TYPE_HP}}
 
 
 def _rea_tonal_eq(spec: MasteringChain) -> dict:
     """ReaEQ: low shelf for weight, high shelf for air.
 
-    Same calibration fix as _rea_subtractive_eq. Band 5 (high-pass) is
-    explicitly zeroed here too — this is a separate ReaEQ instance from
-    the subtractive stage, so band 5 starts at the plugin's own default
-    (observed live: 100Hz) rather than inheriting the subtractive stage's
-    25Hz setting, and nothing previously confirmed whether that band is
-    enabled by default. Setting its gain to 0dB and frequency down to
-    20Hz makes it harmless either way, rather than leaving an unconfirmed
-    ~100Hz high-pass possibly active on the master.
+    Same calibration fix as _rea_subtractive_eq. This is a separate ReaEQ
+    instance whose band 5 defaults to a 100Hz high-pass, so it's explicitly
+    disabled via named_config, and its params also parked at 20Hz / 0dB.
     """
     params = {
         # Band 1 = Low shelf
@@ -150,14 +147,16 @@ def _rea_tonal_eq(spec: MasteringChain) -> dict:
         9: _hz_to_reaeq(spec.high_shelf_freq),
         10: _db_to_reaeq_gain(spec.high_shelf_db),
         11: _q_to_reaeq_bw(0.7),
-        # Silence band 2/3 and HP (band 5) — see docstring on why HP is
-        # explicitly zeroed rather than left untouched.
+        # Silence band 2/3 and park HP (band 5)
         4: _db_to_reaeq_gain(0.0),
         7: _db_to_reaeq_gain(0.0),
         12: _hz_to_reaeq(20),
         13: _db_to_reaeq_gain(0.0),
     }
-    return {"name": "ReaEQ", "params_by_index": params}
+    return {"name": "ReaEQ", "params_by_index": params,
+            "named_config": {**_reaeq_hp_enable(False),
+                             "BANDTYPE0": _REAEQ_TYPE_LOW_SHELF, "BANDENABLED0": "1",
+                             "BANDTYPE3": _REAEQ_TYPE_HIGH_SHELF, "BANDENABLED3": "1"}}
 
 
 def _rea_bus_comp(comp: CompProfile) -> dict:

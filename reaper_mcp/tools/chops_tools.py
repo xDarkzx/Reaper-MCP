@@ -174,7 +174,9 @@ def register(mcp: FastMCP):
     async def item_split_at_transients(item_index: int) -> dict:
         """Slice an audio item at every detected transient.
 
-        Uses REAPER's native transient detection (action 40310). Sensitivity
+        Uses REAPER's native transient detection (stepping "Move cursor to
+        next transient in items" across the item; the edit cursor is put
+        back afterwards). Sensitivity
         is controlled by REAPER's project settings (Options → Preferences →
         Project → Item handling → Transient detection sensitivity), not
         by this tool — set it once in REAPER and it applies to every call.

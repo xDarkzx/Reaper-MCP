@@ -200,6 +200,42 @@ def list_profiles(family: Optional[str] = None) -> list[str]:
 # Helpers to resolve live track_map → role_map using aliases
 # ────────────────────────────────────────────────────────────────
 
+# Generic stem names, tried only for a track the style's own aliases don't
+# match. Each maps to candidate roles in preference order; the first role the
+# style actually has wins, so a name never lands on a role that doesn't fit
+# (e.g. "Drums" never becomes `kick` in a style without a full-kit role).
+_GENERIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "guitar": ("rhythm_guitar", "clean_guitar"),
+    "bass": ("bass_guitar", "slap_bass", "upright_bass", "bass", "bass_808", "sub_bass"),
+    "vocal": ("vocal_lead",),
+    "vox": ("vocal_lead",),
+    "piano": ("piano", "electric_piano"),
+    "keys": ("piano", "electric_piano"),
+    "strings": ("strings_section",),
+    "pad": ("pad",),
+    "lead": ("lead_synth", "lead_guitar"),
+    "horns": ("horns_section",),
+    "brass": ("horns_section", "brass_orchestral"),
+}
+
+
+def is_bus_track(track: dict) -> bool:
+    """A track with no media that receives sends is a bus or FX return
+    (e.g. "Plate Reverb (Vocals)"), not an instrument — per-role EQ and
+    compression don't belong on it even if its name contains a role word."""
+    return track.get("item_count") == 0 and track.get("receive_count", 0) > 0
+
+
+def _longest_match(name: str, aliases: dict[str, list[str]] | dict[str, tuple[str, ...]]):
+    best_key, best_len = None, -1
+    for key, alias_list in aliases.items():
+        for alias in alias_list:
+            a = alias.lower()
+            if a and a in name and len(a) > best_len:
+                best_key, best_len = key, len(a)
+    return best_key
+
+
 def resolve_roles(profile: StyleProfile, live_tracks: list[dict]) -> dict[int, str]:
     """Map REAPER track index → role name using the profile's aliases.
 
@@ -208,20 +244,21 @@ def resolve_roles(profile: StyleProfile, live_tracks: list[dict]) -> dict[int, s
     Matching: LONGEST matching alias wins. This means "Vocal Chop" resolves
     to role `vocal_chop` (alias "vocal chop", len=10) rather than `vocal_lead`
     (alias "vocal", len=5), even though both would match as substrings.
+    A track no style alias matches falls back to _GENERIC_ALIASES. Bus and
+    FX-return tracks are skipped.
     """
+    generic = {word: (word,) for word in _GENERIC_ALIASES}
     role_map: dict[int, str] = {}
     for track in live_tracks:
         name = (track.get("name") or "").lower()
-        if not name:
+        if not name or is_bus_track(track):
             continue
-        best_role: Optional[str] = None
-        best_alias_len = -1
-        for role, alias_list in profile.aliases.items():
-            for alias in alias_list:
-                a = alias.lower()
-                if a and a in name and len(a) > best_alias_len:
-                    best_role = role
-                    best_alias_len = len(a)
+        best_role = _longest_match(name, profile.aliases)
+        if best_role is None:
+            word = _longest_match(name, generic)
+            if word is not None:
+                best_role = next(
+                    (r for r in _GENERIC_ALIASES[word] if r in profile.instrument_roles), None)
         if best_role is not None:
             role_map[int(track["index"])] = best_role
     return role_map

@@ -8,9 +8,10 @@ inventory (`get_inventory`, which already applies the user's preferences) and
 resolves each category the engine places (eq, compressor, reverb, limiter) to
 the family whose parameter map can drive the chosen plugin.
 
-REAPER's own plugins are a last resort: they are used for a category only when
-no supported third-party plugin is installed for it, even if a preference names
-one.
+The user's preference always wins when the engine can drive it, including a
+REAPER stock plugin while FabFilter is installed. Only without a preference does
+the engine choose for itself, and then a supported third-party plugin beats
+REAPER's own.
 
 A preference for a plugin the engine has no parameter map for, or that is not
 installed, cannot be honored. The engine then uses the best supported plugin
@@ -114,21 +115,16 @@ def resolve_selection(inventory: PluginInventory) -> PluginSelection:
         family = family_for(category, pick) if pick else None
         if family is None:
             family = _fallback_family(category, installed)
-        stock_overridden = False
-        if family == PluginSuite.REAPER_STOCK and _fallback_family(category, installed) == PluginSuite.FABFILTER:
-            # REAPER's own plugins are only a last resort: never pick them
-            # while a supported third-party plugin is installed.
+        chosen_by_user = bool(preference) and pick == preference and family_for(category, pick) is not None
+        if (not chosen_by_user and family == PluginSuite.REAPER_STOCK
+                and _fallback_family(category, installed) == PluginSuite.FABFILTER):
+            # The engine's own pick prefers a supported third-party plugin
+            # over REAPER's; a preference the user set is never overridden.
             family = PluginSuite.FABFILTER
-            stock_overridden = True
         used = FAMILY_PLUGIN_NAMES[family][category]
 
         if preference:
-            if stock_overridden and family_for(category, preference) == PluginSuite.REAPER_STOCK:
-                ignored[category] = (
-                    f"'{preference}' is a REAPER stock plugin, which is only used when no "
-                    f"supported third-party plugin is installed, so {used} was used instead"
-                )
-            elif pick != preference:
+            if pick != preference:
                 # The inventory only keeps a preference that is installed.
                 ignored[category] = f"'{preference}' is not installed, so {used} was used instead"
             elif family_for(category, preference) is None:
@@ -175,10 +171,7 @@ def describe_preference_support(preferences: dict[str, str]) -> dict[str, dict]:
             report[category] = {
                 "supported": True,
                 "family": family.value,
-                "note": (
-                    "REAPER stock plugins are only used when no supported third-party "
-                    "plugin is installed for this category"
-                ),
+                "note": "used for this category even if a third-party plugin is installed",
             }
         else:
             report[category] = {"supported": True, "family": family.value}

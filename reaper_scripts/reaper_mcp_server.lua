@@ -671,6 +671,27 @@ local function sorted_name_pairs(t)
   end
 end
 
+-- Write plugin named-config values (state that isn't an automatable param,
+-- e.g. ReaEQ's per-band BANDENABLEDx) and report what REAPER reads back.
+-- The setter's return value is not trusted: ReaEQ returns false for
+-- BANDENABLEDx even when the write takes effect, so `ok` comes from the
+-- read-back alone.
+local function apply_named_config(tr, fx_idx, named_config)
+  local results = {}
+  if type(named_config) ~= "table" then return results end
+  if not (reaper.TrackFX_SetNamedConfigParm and reaper.TrackFX_GetNamedConfigParm) then
+    results[#results+1] = {error = "named_config requires REAPER 6.37+"}
+    return results
+  end
+  for key, val in sorted_name_pairs(named_config) do
+    local want = tostring(val)
+    reaper.TrackFX_SetNamedConfigParm(tr, fx_idx, tostring(key), want)
+    local _, got = reaper.TrackFX_GetNamedConfigParm(tr, fx_idx, tostring(key))
+    results[#results+1] = {key = key, requested = want, value = got, ok = (got == want)}
+  end
+  return results
+end
+
 local function build_fx_chain(tr)
   local count = reaper.TrackFX_GetCount(tr)
   local chain = {}
@@ -2356,7 +2377,26 @@ function item.item_split_at_transients(p)
   reaper.Main_OnCommand(40289, 0)  -- Item: Unselect all items
   reaper.SetMediaItemSelected(it, true)
   local count_before = reaper.CountMediaItems(0)
-  reaper.Main_OnCommand(40310, 0)  -- Item: Split items at transients
+
+  -- REAPER has no "split at transients" main action, so walk the item's
+  -- transients with "Item navigation: Move cursor to next transient in
+  -- items" (40375) and split at each. Split right-to-left so `it` stays the
+  -- left part containing every remaining position.
+  local saved_cursor = reaper.GetCursorPosition()
+  reaper.SetEditCurPos(orig_pos, false, false)
+  local positions = {}
+  local last = orig_pos
+  for _ = 1, 10000 do
+    reaper.Main_OnCommand(40375, 0)
+    local pos = reaper.GetCursorPosition()
+    if pos <= last + 1e-6 or pos >= orig_end - 1e-6 then break end
+    positions[#positions+1] = pos
+    last = pos
+  end
+  reaper.SetEditCurPos(saved_cursor, false, false)
+  for i = #positions, 1, -1 do
+    reaper.SplitMediaItem(it, positions[i])
+  end
   local count_after = reaper.CountMediaItems(0)
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
@@ -2539,7 +2579,7 @@ function item.take_set_reversed(p)
   reaper.PreventUIRefresh(1)
   reaper.Main_OnCommand(40289, 0)  -- Unselect all items
   reaper.SetMediaItemSelected(it, true)
-  reaper.Main_OnCommand(41051, 0)  -- Item: Reverse items as new take
+  reaper.Main_OnCommand(40270, 0)  -- Item: Reverse items to new take
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("MCP: take_set_reversed", -1)
@@ -4363,6 +4403,7 @@ function compose.setup_fx_chain(p)
         end
 
         local params_set = {}
+        local named_config_set = apply_named_config(tr, fx_idx, fx_entry.named_config)
 
         -- Set params by name (fuzzy match)
         if fx_entry.params then
@@ -4438,6 +4479,7 @@ function compose.setup_fx_chain(p)
           name = fx_entry.name,
           fx_index = fx_idx,
           params_set = params_set,
+          named_config_set = named_config_set,
           preset = fx_entry.preset,
         }
 
@@ -4597,37 +4639,15 @@ function compose.setup_master_chain(p)
   local ok, cleared_or_err, fx_results = pcall(function()
     local cleared = 0
     if p.clean then
-      local clear_names = p.clean_names
-      if type(clear_names) == "string" then clear_names = json_decode(clear_names) end
-      clear_names = clear_names or {"ReaEQ", "ReaComp", "ReaLimit",
-                                     "FabFilter Pro-Q 3", "FabFilter Pro-C 2",
-                                     "FabFilter Pro-L", "FabFilter Pro-L 2"}
-      -- First pass: remove any FX tagged by the mix engine with the
-      -- "[MIX] " prefix. Safe — we know we added these.
+      -- Remove only FX the mix engine tagged with the "[MIX] " prefix. No
+      -- name-matching fallback: it used to delete a user's own FabFilter /
+      -- Rea* master chain whenever no tagged FX were present.
       local num_fx = reaper.TrackFX_GetCount(master)
-      local any_tagged = false
       for fi = num_fx - 1, 0, -1 do
         local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
         if fn:sub(1, 6) == "[MIX] " then
           reaper.TrackFX_Delete(master, fi)
           cleared = cleared + 1
-          any_tagged = true
-        end
-      end
-      -- Fallback — only if we found NO tagged FX, fall back to name-substring
-      -- matching for backward compat with projects from before the prefix
-      -- system. New projects rely on the tagged pass above exclusively.
-      if not any_tagged then
-        num_fx = reaper.TrackFX_GetCount(master)
-        for fi = num_fx - 1, 0, -1 do
-          local _, fn = reaper.TrackFX_GetFXName(master, fi, "")
-          for _, cname in ipairs(clear_names) do
-            if fn:find(cname, 1, true) then
-              reaper.TrackFX_Delete(master, fi)
-              cleared = cleared + 1
-              break
-            end
-          end
         end
       end
     end
@@ -4644,6 +4664,8 @@ function compose.setup_master_chain(p)
             results[#results+1] = {name = fx_entry.name, error = "Plugin not installed or name mismatch — check spelling / install plugin"}
             goto next_master_fx
           end
+
+          local named_config_set = apply_named_config(master, fx_idx, fx_entry.named_config)
 
           -- Set params by name (fuzzy)
           if fx_entry.params then
@@ -4681,7 +4703,8 @@ function compose.setup_master_chain(p)
             reaper.TrackFX_SetNamedConfigParm(master, fx_idx, "renamed_name", tostring(fx_entry.renamed_name))
           end
 
-          results[#results+1] = {name = fx_entry.name, fx_index = fx_idx}
+          results[#results+1] = {name = fx_entry.name, fx_index = fx_idx,
+                                 named_config_set = named_config_set}
           ::next_master_fx::
         end
       end
@@ -5077,6 +5100,45 @@ end
 
 local envelope = {}
 
+-- Action names verified with kbd_getTextFromCmd on REAPER 7.x.
+local ENVELOPE_CREATE_ACTIONS = {
+  ["Volume"] = 40406,           -- Track: Toggle track volume envelope visible
+  ["Pan"] = 40407,              -- Track: Toggle track pan envelope visible
+  ["Mute"] = 40867,             -- Track: Toggle track mute envelope visible
+  ["Volume (Pre-FX)"] = 40408,  -- Track: Toggle track pre-FX volume envelope visible
+  ["Pan (Pre-FX)"] = 40409,     -- Track: Toggle track pre-FX pan envelope visible
+  ["Width"] = 41870,            -- Track: Select width envelope
+  ["Width (Pre-FX)"] = 41869,   -- Track: Select pre-FX width envelope
+}
+
+-- The create actions work on selected tracks and move the fader's current
+-- value into a seed point while resetting the fader (measured: a -7 dB fader
+-- jumps to 0 dB with a point at t=0 holding -7 dB). Undo all of that so the
+-- track sounds the same and only the caller's points end up in the envelope.
+local function _create_track_envelope(tr, name, cmd)
+  local selected = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do
+    selected[#selected+1] = reaper.GetSelectedTrack(0, i)
+  end
+  local vol = reaper.GetMediaTrackInfo_Value(tr, "D_VOL")
+  local pan = reaper.GetMediaTrackInfo_Value(tr, "D_PAN")
+  local width = reaper.GetMediaTrackInfo_Value(tr, "D_WIDTH")
+
+  reaper.SetOnlyTrackSelected(tr)
+  reaper.Main_OnCommand(cmd, 0)
+  local env = reaper.GetTrackEnvelopeByName(tr, name)
+  if env then
+    reaper.DeleteEnvelopePointRange(env, -1, 1e12)
+  end
+
+  reaper.SetMediaTrackInfo_Value(tr, "D_VOL", vol)
+  reaper.SetMediaTrackInfo_Value(tr, "D_PAN", pan)
+  reaper.SetMediaTrackInfo_Value(tr, "D_WIDTH", width)
+  reaper.SetTrackSelected(tr, false)
+  for _, t in ipairs(selected) do reaper.SetTrackSelected(t, true) end
+  return env
+end
+
 local function _resolve_envelope(p)
   local tr = reaper.GetTrack(0, math.floor(p.track_index or -1))
   if not tr then return nil, "Track not found" end
@@ -5099,18 +5161,49 @@ local function _resolve_envelope(p)
   local name = p.envelope_name or "Volume"
   local env = reaper.GetTrackEnvelopeByName(tr, name)
   if not env and p.create then
-    -- REAPER creates volume/pan envelopes via Main_OnCommand on selected track
-    reaper.SetOnlyTrackSelected(tr)
-    if name == "Volume" then reaper.Main_OnCommand(40406, 0)  -- Track: Toggle volume envelope
-    elseif name == "Pan" then reaper.Main_OnCommand(40407, 0)
-    elseif name == "Mute" then reaper.Main_OnCommand(40867, 0)
+    local cmd = ENVELOPE_CREATE_ACTIONS[name]
+    if not cmd then
+      return nil, "Track envelope '" .. name .. "' can't be created by this tool."
     end
-    env = reaper.GetTrackEnvelopeByName(tr, name)
+    env = _create_track_envelope(tr, name, cmd)
+    if not env then
+      return nil, "Track envelope '" .. name .. "' could not be created."
+    end
+    return env, nil, true
   end
   if not env then
     return nil, "Track envelope '" .. name .. "' not found. Pass create=true to create it."
   end
   return env, nil
+end
+
+-- Pan envelopes store pan negated (+1 = hard left), unlike D_PAN and this
+-- tool's documented -1 = left. Measured: creating a Pan envelope on a track
+-- panned -0.5 seeds the envelope with +0.5.
+local function _is_track_pan_envelope(p)
+  if p.fx_index ~= nil and p.param_index ~= nil then return false end
+  local name = p.envelope_name or "Volume"
+  return name == "Pan" or name == "Pan (Pre-FX)"
+end
+
+-- Envelope points are stored in the envelope's own scaling mode (Volume
+-- envelopes use fader scaling, where 0 dB is ~716, not 1.0). Convert so the
+-- tool reads and writes its documented units in every mode; mode 0 is a
+-- no-op, so pan/width/mute/FX-param envelopes are unaffected.
+local function _env_value_to_reaper(env, p, v)
+  if _is_track_pan_envelope(p) then v = -v end
+  if reaper.GetEnvelopeScalingMode and reaper.ScaleToEnvelopeMode then
+    v = reaper.ScaleToEnvelopeMode(reaper.GetEnvelopeScalingMode(env), v)
+  end
+  return v
+end
+
+local function _env_value_from_reaper(env, p, v)
+  if reaper.GetEnvelopeScalingMode and reaper.ScaleFromEnvelopeMode then
+    v = reaper.ScaleFromEnvelopeMode(reaper.GetEnvelopeScalingMode(env), v)
+  end
+  if _is_track_pan_envelope(p) then v = -v end
+  return v
 end
 
 function envelope.envelope_get_points(p)
@@ -5123,7 +5216,7 @@ function envelope.envelope_get_points(p)
   for i = 0, returned - 1 do
     local _, time, value, shape, tension, selected = reaper.GetEnvelopePoint(env, i)
     points[#points+1] = {
-      index = i, time = time, value = value,
+      index = i, time = time, value = _env_value_from_reaper(env, p, value),
       shape = shape, tension = tension, selected = selected,
     }
   end
@@ -5136,16 +5229,18 @@ function envelope.envelope_get_points(p)
 end
 
 function envelope.envelope_add_points(p)
-  local env, err = _resolve_envelope(p)
+  local env, err, created = _resolve_envelope(p)
   if not env then return nil, err end
   local pts = p.points
   if type(pts) == "string" then pts = json_decode(pts) end
   if type(pts) ~= "table" then return nil, "points must be a JSON array" end
   local added = 0
+  local first_time = nil
   for _, pt in ipairs(pts) do
     if type(pt.time) == "number" and type(pt.value) == "number" then
+      if first_time == nil or pt.time < first_time then first_time = pt.time end
       reaper.InsertEnvelopePoint(
-        env, pt.time, pt.value,
+        env, pt.time, _env_value_to_reaper(env, p, pt.value),
         math.floor(pt.shape or 0),
         pt.tension or 0,
         pt.selected and true or false,
@@ -5154,7 +5249,14 @@ function envelope.envelope_add_points(p)
       added = added + 1
     end
   end
+  -- REAPER gives a new, empty envelope a default point at t=0 (measured:
+  -- neutral value), which would ramp into the caller's first point. On an
+  -- envelope this call created, nothing before the caller's first point is
+  -- theirs.
   reaper.Envelope_SortPoints(env)
+  if created and first_time and first_time > 0 then
+    reaper.DeleteEnvelopePointRange(env, -1, first_time - 1e-6)
+  end
   reaper.UpdateArrange()
   return {success = true, points_added = added}
 end
@@ -5396,14 +5498,14 @@ end
 
 function project.project_set_ripple_mode(p)
   local mode = math.floor(tonumber(p.mode or 0) or 0)
-  -- 0 = off, 1 = per-track, 2 = all tracks
-  reaper.GetSetRepeatEx(0, 0)  -- (unrelated, but we'll use Main_OnCommand)
+  -- 0 = off, 1 = per-track, 2 = all tracks. IDs verified with
+  -- kbd_getTextFromCmd: 40312 is "Item: Remove selected area of items".
   if mode == 0 then
-    reaper.Main_OnCommand(40310, 0)  -- Options: Set ripple editing off (ensures we start from known state)
+    reaper.Main_OnCommand(40309, 0)  -- Set ripple editing off
   elseif mode == 1 then
-    reaper.Main_OnCommand(40311, 0)  -- Options: Set ripple editing per-track
+    reaper.Main_OnCommand(40310, 0)  -- Set ripple editing per-track
   elseif mode == 2 then
-    reaper.Main_OnCommand(40312, 0)  -- Options: Set ripple editing all tracks
+    reaper.Main_OnCommand(40311, 0)  -- Set ripple editing all tracks
   else
     return nil, "mode must be 0 (off), 1 (per-track), or 2 (all tracks)"
   end
@@ -5819,6 +5921,7 @@ local UNDO_POINT_COMMANDS = {
   item_create_midi = true,
   item_duplicate = true,
   item_split_at_positions = true,
+  item_split_at_transients = true,
   items_apply = true,
   midi_delete_all_notes = true,
   midi_delete_cc = true,
@@ -5929,6 +6032,7 @@ local UNDO_ITEM_COMMANDS = {
   item_set_volume = true,
   item_split = true,
   item_split_at_positions = true,
+  item_split_at_transients = true,
   item_take_add = true,
   item_take_delete_active = true,
   item_take_set_active = true,

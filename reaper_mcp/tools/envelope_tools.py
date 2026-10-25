@@ -114,6 +114,10 @@ def register(mcp: FastMCP):
         For FX param envelopes: pass `fx_index` and `param_index` (get these
         from `fx_get_params`). `envelope_name` is ignored when FX param is set.
 
+        Values come back in the same units envelope_add_points takes (Volume
+        as linear gain, 1.0 = 0 dB; Pan -1.0 left to +1.0 right), converted
+        from REAPER's internal envelope scale.
+
         Args:
             track_index: Track.
             envelope_name: Named track envelope (ignored if fx_index+param_index set).
@@ -167,6 +171,8 @@ def register(mcp: FastMCP):
             envelope_name: Track envelope name (ignored with FX param).
             fx_index / param_index: Target FX param envelope (-1 for track env).
             create: If the envelope doesn't exist yet, create it (default True).
+                    Creating keeps the track's fader, pan, width and track
+                    selection as they were.
         """
         if track_index < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")

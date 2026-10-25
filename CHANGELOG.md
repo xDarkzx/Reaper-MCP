@@ -4,7 +4,81 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `setup_fx_chain` entries accept `named_config` for plugin state that
+  isn't an automatable param (e.g. `{"BANDENABLED4": "1"}`). Each value is
+  read back and reported in `named_config_set`, because REAPER's setter can
+  return false even when the write works. `engine_master` applies it too.
+
+### Changed
+
+- **A saved FX preference is never overridden.** Choosing ReaEQ / ReaComp /
+  ReaVerbate / ReaLimit for a category now uses it even with FabFilter
+  installed (previously the engine silently swapped it for FabFilter). With
+  no preference, the engine still picks the best installed plugin.
+
 ### Fixed
+
+- **ReaEQ's high-pass band was never switched on, so every `hp_freq` in
+  every mix profile (and the master's 25Hz rumble filter) had no effect**
+  (issue #44). Band 5 ships disabled and its enable state isn't an
+  automatable param. The EQ builders now switch it on via `named_config`
+  only when there's a real high-pass, and off on the master tonal EQ.
+- **`envelope_add_points`/`envelope_get_points` wrote and read raw
+  envelope values** (issue #44, confirmed live). Volume envelopes use fader
+  scaling, where 0 dB is ~716, so the documented "1.0 = unity" landed near
+  silence. Values now go through the envelope's own scaling mode.
+- **Pan envelopes were mirrored left/right.** REAPER stores pan envelope
+  values negated (measured: a track panned -0.5 seeds its envelope with
+  +0.5); the tools now convert, so -1.0 is hard left as documented.
+- **Creating an envelope reset the track's fader/pan, left a stray point
+  at t=0 and changed the track selection** (issue #44, confirmed live:
+  -7 dB fader jumped to 0 dB). Fader, pan, width and selection are now
+  restored and the seed point removed.
+- **Width and the Pre-FX Volume/Pan/Width envelopes couldn't be created**
+  even though the tools listed them, and the error still said "pass
+  create=true". They can now be created; failures give an accurate error.
+- **`project_set_ripple_mode` ran the wrong actions**: every ID was off by
+  one, so mode 0 turned per-track ripple *on*, and mode 2 ran "Item:
+  Remove selected area of items". It also turned loop-repeat off on every
+  call. Action IDs are now verified against REAPER's own action names.
+- **`item_split_at_transients` never split anything**: action 40310 is
+  "Set ripple editing per-track", not a split, and REAPER has no native
+  split-at-transients action. It now walks the item's transients with
+  "Move cursor to next transient in items" and splits at each, restoring
+  the edit cursor afterwards.
+- **`take_set_reversed` toggled reverse in place** (41051) instead of
+  "Reverse items to new take" (40270) as documented, so calling it twice
+  silently un-reversed the item.
+- **The stock EQ dropped bell bands: 124 of the catalog's 375 roles lost
+  at least one** (e.g. alt_rock's lead-vocal +2dB presence boost at 4kHz).
+  Only ReaEQ bands 2/3 took bells, on the wrong belief that bands 1/4 are
+  fixed shelves. They switch to bells via `BANDTYPEx` (confirmed live), so
+  bells now use any band a shelf doesn't need, and no catalog role loses a
+  band. Band type and enable are written explicitly for every band used, so
+  a custom ReaEQ default preset can't change the result.
+- **ReaVerbate width was written on the wrong scale.** Its Width param runs
+  -1.00..+1.00 (0.5 = mono), so the "room" bus's 0.8 width landed at 0.60,
+  and 0.0 would have inverted the stereo image. Now `(width + 1) / 2`.
+  Room size, previously flagged as non-linear, was swept and is linear
+  (30..98), so it was already correct.
+- **`engine_master`/`engine_mix` with `clean=True` could delete the user's
+  own FX.** When no `[MIX] `-tagged FX were present, both fell back to
+  removing anything named like ReaEQ / ReaComp / ReaLimit / Pro-Q 3 /
+  Pro-C 2 / Pro-L, so a hand-built FabFilter master chain was wiped. Clean
+  now removes only FX the engine tagged itself.
+- **`engine_fix_mix` added untagged FX** (it relied on that fallback to
+  replace its own chain); its track EQ and master chain are now tagged.
+- **Bus and FX-return tracks got instrument processing**: a return named
+  "Plate Reverb (Vocals)" was given lead-vocal EQ/compression by
+  `engine_mix`, and `engine_fix_mix` EQ'd every return. Tracks with no media
+  that receive sends are now skipped.
+- **Plain stem names matched no role**: "Guitar" and "Bass" were unmatched
+  in every rock style (only "gtr"/"bass gtr" were aliases), and similar gaps
+  existed across families. A track the style's aliases miss now falls back
+  to common names (guitar, bass, vocal, piano, keys, strings, pad, lead,
+  horns), only ever onto a role that style actually has.
 
 - **The stock-plugin fallback (ReaComp/ReaLimit/ReaEQ, used by `engine_mix`/
   `engine_master` whenever FabFilter isn't installed) wrote several
