@@ -5140,8 +5140,8 @@ local function _create_track_envelope(tr, name, cmd)
 end
 
 local function _resolve_envelope(p)
-  local tr = reaper.GetTrack(0, math.floor(p.track_index or -1))
-  if not tr then return nil, "Track not found" end
+  local tr, _, terr = get_track(p)
+  if not tr then return nil, terr end
   local fx_index = p.fx_index
   local param_index = p.param_index
   if fx_index ~= nil and param_index ~= nil then

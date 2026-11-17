@@ -15,6 +15,18 @@ _TRACK_ENVELOPE_NAMES = {
     "Volume (Pre-FX)", "Pan (Pre-FX)", "Width (Pre-FX)",
 }
 
+MASTER_TRACK_INDEX = -1
+
+
+def _check_track_index(track_index: int) -> None:
+    """Envelope tools address the master track as index -1."""
+    if track_index < MASTER_TRACK_INDEX:
+        raise ReaperMCPError(
+            ErrorCode.VALUE_OUT_OF_RANGE,
+            "track_index must be >= 0, or -1 for the master track",
+        )
+
+
 _GAIN_ENVELOPES = {"Volume", "Volume (Pre-FX)", "Width", "Width (Pre-FX)"}
 _PAN_ENVELOPES = {"Pan", "Pan (Pre-FX)"}
 
@@ -119,14 +131,13 @@ def register(mcp: FastMCP):
         from REAPER's internal envelope scale.
 
         Args:
-            track_index: Track.
+            track_index: 0-based track index, or -1 for the master track.
             envelope_name: Named track envelope (ignored if fx_index+param_index set).
             fx_index: FX slot index, -1 to target track envelope instead.
             param_index: FX parameter index, -1 to target track envelope instead.
             max_results: Cap on returned points (default 2000, prevents context blow-up).
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if max_results <= 0 or max_results > 20000:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "max_results must be 1-20000")
         if fx_index < 0 and envelope_name not in _TRACK_ENVELOPE_NAMES:
@@ -166,7 +177,7 @@ def register(mcp: FastMCP):
           - FX params: 0.0-1.0 normalized (same as setup_fx_chain's params/params_by_index).
 
         Args:
-            track_index: Track.
+            track_index: 0-based track index, or -1 for the master track.
             points: JSON array of `{"time":s, "value":v, "shape":0, "tension":0}`.
             envelope_name: Track envelope name (ignored with FX param).
             fx_index / param_index: Target FX param envelope (-1 for track env).
@@ -174,8 +185,7 @@ def register(mcp: FastMCP):
                     Creating keeps the track's fader, pan, width and track
                     selection as they were.
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         try:
             pts = json.loads(points)
         except (json.JSONDecodeError, TypeError) as e:
@@ -220,14 +230,13 @@ def register(mcp: FastMCP):
         """Delete all envelope points in a time range.
 
         Args:
-            track_index: Track.
+            track_index: 0-based track index, or -1 for the master track.
             start_time: Range start in seconds (>= 0).
             end_time: Range end in seconds (> start_time).
             envelope_name: Track envelope name.
             fx_index / param_index: Target FX param envelope (-1 for track env).
         """
-        if track_index < 0:
-            raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "track_index must be >= 0")
+        _check_track_index(track_index)
         if start_time < 0:
             raise ReaperMCPError(ErrorCode.VALUE_OUT_OF_RANGE, "start_time must be >= 0")
         if end_time <= start_time:

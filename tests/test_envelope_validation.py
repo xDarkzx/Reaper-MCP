@@ -7,6 +7,8 @@ tests/test_item_tools.py already uses for _validate_items_apply_entries.
 import pytest
 
 from reaper_mcp.tools.envelope_tools import (
+    MASTER_TRACK_INDEX,
+    _check_track_index,
     _validate_envelope_value,
     _validate_gain_batch,
 )
@@ -136,3 +138,17 @@ class TestValidateGainBatch:
         pts = [{"time": i * 0.5, "value": 0.0} for i in range(4)]
         with pytest.raises(ReaperMCPError):
             _validate_gain_batch(pts, "Volume (Pre-FX)")
+
+
+class TestCheckTrackIndex:
+    """Envelope tools address the master track as index -1."""
+
+    def test_master_and_numbered_tracks_pass(self):
+        for index in (MASTER_TRACK_INDEX, 0, 7):
+            _check_track_index(index)
+
+    def test_index_below_master_is_refused(self):
+        with pytest.raises(ReaperMCPError) as exc_info:
+            _check_track_index(-2)
+        assert exc_info.value.code == ErrorCode.VALUE_OUT_OF_RANGE
+        assert "-1 for the master track" in str(exc_info.value)

@@ -4,6 +4,13 @@ All notable changes to ReaperMCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `envelope_get_points`, `envelope_add_points` and `envelope_clear_range`
+  accept `track_index=-1` for the master track, the same convention the fx
+  tools use. This lets you automate the master volume (e.g. a fade-out) and
+  pan, or add a master Mute envelope. Numbered tracks behave as before.
+
 ## [0.8.3] - 2026-10-26
 
 ### Added

@@ -37,7 +37,11 @@ end
 
 reaper = {
   GetTrack = function(proj, i) if i == 0 then return "TR" end return nil end,
-  GetTrackEnvelopeByName = function(tr, name) return state.envs[name] end,
+  GetMasterTrack = function() return "MASTER" end,
+  GetTrackEnvelopeByName = function(tr, name)
+    state.resolved_track = tr
+    return state.envs[name]
+  end,
   CountSelectedTracks = function()
     local n = 0
     for _, v in pairs(state.selected) do if v then n = n + 1 end end
@@ -101,11 +105,16 @@ reaper = {
 def _runtime():
     lupa = pytest.importorskip("lupa")
     source = LUA_SRC.read_text(encoding="utf-8")
+    # get_track is what maps track_index -1 to the master track; load the
+    # real one so the handlers resolve tracks exactly as they do in REAPER.
+    track_start = source.index("local MASTER_TRACK_INDEX = -1")
+    track_end = source.index("-- Same as get_track, but refuses the master track")
     start = source.index("local ENVELOPE_CREATE_ACTIONS")
-    end = source.index("function envelope.envelope_clear_range")
+    end = source.index("local tempo = {}")  # through envelope_clear_range
     rt = lupa.LuaRuntime()
     rt.execute(STUB)
-    rt.execute(source[start:end])
+    # One chunk: `local` helpers don't carry across separate execute() calls.
+    rt.execute(source[track_start:track_end] + source[start:end])
     return rt
 
 
@@ -203,3 +212,41 @@ def test_existing_envelope_points_before_batch_are_kept():
     _add(rt, {"track_index": 0, "envelope_name": "Pan", "create": True,
               "points": rt.table_from([rt.table_from({"time": 2.0, "value": 0.3})])})
     assert [t for t, _ in _points(rt, "Pan")] == [0.5, 2.0]
+
+
+def test_track_index_minus_one_writes_to_the_master_track():
+    rt = _runtime()
+    _add(rt, {"track_index": -1, "envelope_name": "Volume", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 2.0, "value": 1.0})])})
+    assert rt.eval("state.resolved_track") == "MASTER"
+    assert _points(rt, "Volume") == [(2.0, pytest.approx(716.0))]
+
+
+def test_track_index_minus_one_reads_and_clears_the_master_track():
+    rt = _runtime()
+    _add(rt, {"track_index": -1, "envelope_name": "Volume", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 1.0, "value": 0.5}),
+                                       rt.table_from({"time": 3.0, "value": 0.25})])})
+    got = _get(rt, {"track_index": -1, "envelope_name": "Volume"})
+    assert rt.eval("state.resolved_track") == "MASTER"
+    assert got["points"][1]["value"] == pytest.approx(0.5)
+    rt.eval("envelope.envelope_clear_range")(
+        rt.table_from({"track_index": -1, "envelope_name": "Volume",
+                       "start_time": 2.0, "end_time": 4.0}))
+    assert [t for t, _ in _points(rt, "Volume")] == [1.0]
+
+
+def test_numbered_tracks_still_resolve_as_before():
+    rt = _runtime()
+    _add(rt, {"track_index": 0, "envelope_name": "Volume", "create": True,
+              "points": rt.table_from([rt.table_from({"time": 2.0, "value": 1.0})])})
+    assert rt.eval("state.resolved_track") == "TR"
+
+
+def test_an_unknown_track_index_reports_track_not_found():
+    rt = _runtime()
+    fn = rt.eval("""function()
+      local r, err = envelope.envelope_get_points({track_index = 9, envelope_name = "Volume"})
+      return err
+    end""")
+    assert "Track not found" in fn()
