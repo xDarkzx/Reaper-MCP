@@ -67,6 +67,8 @@ docs/FUTURE_IDEAS.md
 
 # Local tool/session artifacts, not project source
 .agents/
+.codex/
+.tmp_ci_*/
 .cookie
 .tmp_song/
 .tmp_song_gen.py

@@ -7,7 +7,10 @@ reaper_mcp.main import client`) has real filesystem side effects
 (ensure_private_dir, history sweep) that unit tests shouldn't trigger.
 """
 
+import math
 from pathlib import Path
+
+import pytest
 
 from reaper_mcp.tools.loops_tools import (
     _matches_key,
@@ -16,6 +19,9 @@ from reaper_mcp.tools.loops_tools import (
     _parse_key,
     _parse_role,
     _passes_filters,
+    _plan_tempo_match,
+    _tempo_match_ratio,
+    _tempo_warnings,
     _walk_subfolders,
 )
 
@@ -207,3 +213,112 @@ class TestScanFilterIntegrationWithParsers:
             "role": _parse_role("Deep_Sub_Bass_128.wav"),
         }
         assert _passes_filters(parsed, [], "/x/Deep_Sub_Bass_128.wav", 125, 130, "") is True
+
+
+class TestTempoMatchRatio:
+    def test_same_tempo_is_unity(self):
+        assert _tempo_match_ratio(128, 128) == pytest.approx(1.0)
+
+    def test_small_difference_stretches_directly(self):
+        # A 120 BPM loop must play faster in a 128 BPM project.
+        assert _tempo_match_ratio(120, 128) == pytest.approx(128 / 120)
+        assert _tempo_match_ratio(128, 120) == pytest.approx(120 / 128)
+
+    def test_half_time_loop_plays_at_own_speed(self):
+        assert _tempo_match_ratio(70, 140) == pytest.approx(1.0)
+
+    def test_double_time_loop_plays_at_own_speed(self):
+        assert _tempo_match_ratio(174, 87) == pytest.approx(1.0)
+
+    def test_prefers_half_time_reading_when_closer(self):
+        # 85 -> 174: direct would be x2.047; as half-time (170) it's x1.0235.
+        assert _tempo_match_ratio(85, 174) == pytest.approx(174 / 170)
+
+    @pytest.mark.parametrize("src", [60, 75, 90, 100, 128, 150, 174, 220])
+    @pytest.mark.parametrize("proj", [70, 90, 120, 140, 174])
+    def test_picks_least_stretch_of_half_normal_double(self, src, proj):
+        r = _tempo_match_ratio(src, proj)
+        candidates = [proj / (src * m) for m in (0.5, 1.0, 2.0)]
+        assert r in candidates
+        assert all(abs(math.log(r)) <= abs(math.log(c)) + 1e-12 for c in candidates)
+
+    def test_far_apart_tempos_still_get_the_needed_stretch(self):
+        # 60 -> 174 has no close half/double reading; x1.45 (via 120) is honest.
+        assert _tempo_match_ratio(60, 174) == pytest.approx(174 / 120)
+
+
+class TestPlanTempoMatch:
+    def test_bpm_from_filename(self):
+        plan = _plan_tempo_match({}, "Drum_Loop_120bpm.wav", 128.0, True)
+        assert plan["source_bpm"] == 120.0
+        assert plan["bpm_from"] == "filename"
+        assert plan["playrate"] == pytest.approx(128 / 120)
+        assert plan["skipped"] is None
+
+    def test_entry_source_bpm_overrides_filename(self):
+        plan = _plan_tempo_match({"source_bpm": 125}, "Loop_120bpm.wav", 125.0, True)
+        assert plan["source_bpm"] == 125.0
+        assert plan["bpm_from"] == "entry"
+        assert plan["playrate"] is None
+        assert plan["skipped"] == "already in time"
+
+    def test_one_shot_without_bpm_is_untouched(self):
+        plan = _plan_tempo_match({}, "Kick_Punchy.wav", 128.0, True)
+        assert plan["source_bpm"] is None
+        assert plan["playrate"] is None
+        assert "no BPM" in plan["skipped"]
+
+    def test_call_level_off(self):
+        plan = _plan_tempo_match({}, "Loop_120bpm.wav", 128.0, False)
+        assert plan["playrate"] is None
+        assert plan["skipped"] == "match_tempo is off"
+        # BPM still reported so the caller can see what it would have been.
+        assert plan["source_bpm"] == 120.0
+
+    def test_entry_level_overrides_call_level_both_ways(self):
+        on = _plan_tempo_match({"match_tempo": True}, "Loop_120bpm.wav", 128.0, False)
+        off = _plan_tempo_match({"match_tempo": False}, "Loop_120bpm.wav", 128.0, True)
+        assert on["playrate"] == pytest.approx(128 / 120)
+        assert off["playrate"] is None
+
+    @pytest.mark.parametrize("bad", ["120", True, "abc", [120]])
+    def test_non_numeric_source_bpm_rejected(self, bad):
+        with pytest.raises(ValueError, match="source_bpm must be a number"):
+            _plan_tempo_match({"source_bpm": bad}, "x.wav", 128.0, True)
+
+    @pytest.mark.parametrize("bad", [0, 39.9, 300.1, -120])
+    def test_out_of_range_source_bpm_rejected(self, bad):
+        with pytest.raises(ValueError, match="source_bpm must be 40-300"):
+            _plan_tempo_match({"source_bpm": bad}, "x.wav", 128.0, True)
+
+    def test_non_bool_match_tempo_rejected(self):
+        with pytest.raises(ValueError, match="match_tempo must be true or false"):
+            _plan_tempo_match({"match_tempo": "yes"}, "x.wav", 128.0, True)
+
+
+class TestTempoWarnings:
+    def _d(self, requested, applied, source_bpm=120.0):
+        return {
+            "file": "Loop.wav", "source_bpm": source_bpm,
+            "playrate_requested": requested, "playrate": applied,
+        }
+
+    def test_untouched_loops_never_warn(self):
+        assert _tempo_warnings([self._d(None, 1.0)]) == []
+
+    def test_small_stretch_no_warning(self):
+        assert _tempo_warnings([self._d(1.0667, 1.0667)]) == []
+
+    def test_large_stretch_warns(self):
+        warnings = _tempo_warnings([self._d(1.25, 1.25, source_bpm=100.0)])
+        assert len(warnings) == 1
+        assert "+25%" in warnings[0]
+
+    def test_playrate_not_applied_points_at_outdated_script(self):
+        warnings = _tempo_warnings([self._d(1.0667, 1.0)])
+        assert len(warnings) == 1
+        assert "reaper_mcp_server.lua" in warnings[0]
+
+    def test_missing_reported_playrate_also_flagged(self):
+        warnings = _tempo_warnings([self._d(1.0667, None)])
+        assert "reaper_mcp_server.lua" in warnings[0]
