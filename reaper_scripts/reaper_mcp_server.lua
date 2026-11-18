@@ -2245,16 +2245,68 @@ function item.item_insert_media(p)
   if not p.path then return nil, "Missing parameter: path" end
   local pos = p.position or 0
   if pos < 0 then pos = 0 end
-  reaper.SetEditCurPos(pos, false, false)
-  reaper.SetOnlyTrackSelected(tr)
-  reaper.InsertMedia(p.path, 0)
-  reaper.UpdateArrange()
-  local n = reaper.CountTrackMediaItems(tr)
-  if n > 0 then
-    local it = reaper.GetTrackMediaItem(tr, n - 1)
-    return build_item_info(it, reaper.CountMediaItems(0) - 1)
+  -- Optional tempo match, applied in this same call (load_loops). Checked
+  -- before inserting so a bad value can't leave a half-done insert behind.
+  local rate = nil
+  if p.playrate ~= nil then
+    rate = tonumber(p.playrate)
+    if not rate or rate <= 0 then return nil, "playrate must be > 0" end
   end
-  return nil, "Media insert failed"
+  -- Build the item straight from the file, the same way
+  -- chops_create_virtual_slice does, rather than through InsertMedia.
+  -- InsertMedia runs REAPER's import routine, which can stop on a prompt
+  -- in REAPER ("Media contains embedded tempo information, import as:" for
+  -- ACID-tagged sample-pack loops) that blocks this script until someone
+  -- answers it - confirmed live, every load timed out - and whose answer
+  -- can stretch the item on its own, on top of the playrate set below.
+  local src = reaper.PCM_Source_CreateFromFile(p.path)
+  if not src then return nil, "Could not open media file: " .. tostring(p.path) end
+  local src_len, is_qn = reaper.GetMediaSourceLength(src)
+  local len = src_len or 0
+  if is_qn then
+    -- MIDI file sources report length in quarter notes.
+    local start_qn = reaper.TimeMap2_timeToQN(0, pos)
+    len = reaper.TimeMap2_QNToTime(0, start_qn + src_len) - pos
+  end
+  if len <= 0 then
+    reaper.PCM_Source_Destroy(src)
+    return nil, "Media file has no readable audio: " .. tostring(p.path)
+  end
+  local it = reaper.AddMediaItemToTrack(tr)
+  if not it then
+    reaper.PCM_Source_Destroy(src)
+    return nil, "Media insert failed"
+  end
+  local new_take = reaper.AddTakeToMediaItem(it)
+  if not new_take then
+    reaper.DeleteTrackMediaItem(tr, it)
+    reaper.PCM_Source_Destroy(src)
+    return nil, "Media insert failed"
+  end
+  reaper.SetMediaItemTake_Source(new_take, src)
+  reaper.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", basename(p.path), true)
+  reaper.SetMediaItemInfo_Value(it, "D_POSITION", pos)
+  reaper.SetMediaItemInfo_Value(it, "D_LENGTH", len)
+  reaper.UpdateArrange()
+  -- Changing a take's playrate doesn't resize its item, so the length is
+  -- divided by the rate to keep the whole source audible. Pitch is kept
+  -- unless the caller asks for a vinyl-style speed change.
+  if rate then
+    local take = reaper.GetActiveTake(it)
+    if take then
+      reaper.SetMediaItemTakeInfo_Value(take, "D_PLAYRATE", rate)
+      reaper.SetMediaItemTakeInfo_Value(take, "B_PPITCH", p.preserve_pitch == false and 0 or 1)
+      local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+      reaper.SetMediaItemInfo_Value(it, "D_LENGTH", len / rate)
+    end
+  end
+  -- Resolve the real index after the insert, same reasoning as
+  -- item_duplicate: GetMediaItem() enumerates by track then position.
+  local new_idx = -1
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    if reaper.GetMediaItem(0, i) == it then new_idx = i; break end
+  end
+  return build_item_info(it, new_idx)
 end
 
 function item.item_create_midi(p)
@@ -5140,7 +5192,7 @@ local function _create_track_envelope(tr, name, cmd)
 end
 
 local function _resolve_envelope(p)
-  local tr, _, terr = get_track(p)
+  local tr, tidx, terr = get_track(p)
   if not tr then return nil, terr end
   local fx_index = p.fx_index
   local param_index = p.param_index
@@ -5167,6 +5219,11 @@ local function _resolve_envelope(p)
     end
     env = _create_track_envelope(tr, name, cmd)
     if not env then
+      -- Measured live: the mute-envelope action does nothing on the master.
+      if tidx == MASTER_TRACK_INDEX then
+        return nil, "Track envelope '" .. name .. "' could not be created on the master track. "
+                    .. "To silence the master, automate its Volume envelope instead."
+      end
       return nil, "Track envelope '" .. name .. "' could not be created."
     end
     return env, nil, true

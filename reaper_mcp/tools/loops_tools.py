@@ -18,6 +18,7 @@ are just null and the AI can skip them.
 """
 
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -159,6 +160,105 @@ def _parse_bpm(filename: str) -> int | None:
         if 60 <= n <= 220:
             return n
     return None
+
+
+# Half-, normal- and double-time readings of a loop. A 70 BPM loop in a 140
+# BPM project is already in time at its own speed, so it should play at 1.0
+# rather than be stretched 2x. The reading that needs the least stretch
+# wins; a loop far from every reading still gets a large stretch, which
+# _tempo_warnings flags.
+_TEMPO_MULTIPLES = (0.5, 1.0, 2.0)
+
+# Stretches beyond this fraction tend to sound degraded; flagged in the result.
+_STRETCH_WARN_FRACTION = 0.15
+
+_SOURCE_BPM_MIN = 40.0
+_SOURCE_BPM_MAX = 300.0
+
+
+def _tempo_match_ratio(source_bpm: float, project_bpm: float) -> float:
+    """Playrate that puts a loop recorded at source_bpm in time with
+    project_bpm, using whichever half/normal/double-time reading of the loop
+    needs the least stretch."""
+    return min(
+        (project_bpm / (source_bpm * m) for m in _TEMPO_MULTIPLES),
+        key=lambda r: abs(math.log(r)),
+    )
+
+
+def _plan_tempo_match(
+    entry: dict,
+    filename: str,
+    project_bpm: float,
+    match_default: bool,
+) -> dict:
+    """Decide whether and how far to stretch one load_loops entry.
+
+    The entry's own `match_tempo` overrides the call-level default, and its
+    `source_bpm` overrides the BPM parsed from the filename. Files with no
+    BPM (one-shots) are left at their own speed. Raises ValueError for a
+    malformed override so the caller can report it against the entry.
+
+    Returns {source_bpm, bpm_from, playrate, skipped}: playrate None means
+    insert untouched, and `skipped` then says why.
+    """
+    match = entry.get("match_tempo", match_default)
+    if not isinstance(match, bool):
+        raise ValueError("match_tempo must be true or false")
+
+    override = entry.get("source_bpm")
+    if override is not None:
+        if isinstance(override, bool) or not isinstance(override, (int, float)):
+            raise ValueError("source_bpm must be a number")
+        if not _SOURCE_BPM_MIN <= override <= _SOURCE_BPM_MAX:
+            raise ValueError(
+                f"source_bpm must be {_SOURCE_BPM_MIN:g}-{_SOURCE_BPM_MAX:g}"
+            )
+        source_bpm, bpm_from = float(override), "entry"
+    else:
+        parsed = _parse_bpm(filename)
+        source_bpm = float(parsed) if parsed is not None else None
+        bpm_from = "filename" if parsed is not None else None
+
+    plan = {"source_bpm": source_bpm, "bpm_from": bpm_from, "playrate": None, "skipped": None}
+    if not match:
+        plan["skipped"] = "match_tempo is off"
+    elif source_bpm is None:
+        plan["skipped"] = "no BPM in filename (one-shot?) - pass source_bpm to stretch it"
+    else:
+        rate = _tempo_match_ratio(source_bpm, project_bpm)
+        if math.isclose(rate, 1.0, abs_tol=1e-9):
+            plan["skipped"] = "already in time"
+        else:
+            plan["playrate"] = rate
+    return plan
+
+
+def _tempo_warnings(details: list[dict]) -> list[str]:
+    """Flag loaded loops stretched far enough to be audible, and any whose
+    requested playrate REAPER didn't apply - which is what happens when
+    REAPER is still running an older copy of the bridge script that
+    ignores the playrate parameter."""
+    warnings: list[str] = []
+    for d in details:
+        requested = d.get("playrate_requested")
+        if requested is None:
+            continue
+        applied = d.get("playrate")
+        if applied is None or not math.isclose(applied, requested, rel_tol=1e-6):
+            warnings.append(
+                f"{d['file']}: requested playrate {requested:.4f} but REAPER "
+                f"reports {applied} - REAPER is running an older "
+                f"reaper_mcp_server.lua; re-run it in REAPER and load again."
+            )
+            continue
+        stretch = requested - 1.0
+        if abs(stretch) > _STRETCH_WARN_FRACTION:
+            warnings.append(
+                f"{d['file']} ({d['source_bpm']:g} BPM) stretched {stretch:+.0%} "
+                f"- may sound degraded; a loop nearer the project tempo would be cleaner."
+            )
+    return warnings
 
 
 def _parse_key(filename: str) -> str | None:
@@ -595,13 +695,25 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     @undo_grouped(client, "load_loops")
-    async def load_loops(loops: str, project_bpm: float = 0.0) -> dict:
+    async def load_loops(
+        loops: str,
+        project_bpm: float = 0.0,
+        match_tempo: bool = True,
+    ) -> dict:
         """Batch-load audio loops into REAPER, auto-creating tracks by name.
 
         For each entry in the JSON array, find the named track (or create
         it if missing) and insert the audio file at the given position.
         Optionally sets the project BPM first so the loops align with the
         grid.
+
+        Tempo matching (on by default): each loop whose BPM is known is
+        time-stretched, pitch preserved, to the project tempo, and its item
+        resized so the whole loop still plays. The loop's BPM comes from the
+        entry's `source_bpm`, else from its filename ("Kick_128bpm.wav").
+        Half/double time is used when closer, so a 70 BPM loop in a 140 BPM
+        project plays at its own speed. Files with no BPM (one-shots) are
+        inserted untouched.
 
         Args:
             loops: JSON array of entries. Each entry is an object with:
@@ -611,12 +723,21 @@ def register(mcp: FastMCP):
                 - file_path (required): absolute path to the audio file.
                 - position_sec (optional, default 0.0): start position in
                   seconds within the project.
+                - source_bpm (optional): the loop's real BPM, overriding the
+                  filename (40-300). Use when the filename has no BPM or a
+                  number that isn't one.
+                - match_tempo (optional): true/false for this entry only,
+                  overriding the call-level `match_tempo`.
             project_bpm: If > 0, call transport_set_bpm before inserting
-                media so the project's tempo grid is correct.
+                media so the project's tempo grid is correct. Otherwise
+                loops are matched to the project's current tempo.
+            match_tempo: Stretch loops to the project tempo. Default True.
 
         Returns a summary with tracks created vs reused, loops loaded, and
         per-entry errors (missing files, invalid entries) so the AI can
-        recover without blowing up the whole batch.
+        recover without blowing up the whole batch. Each loaded entry in
+        `details` carries its item_index, source_bpm and playrate, and
+        `tempo_warnings` lists stretches large enough to be audible.
         """
         try:
             loop_list = json.loads(loops)
@@ -642,6 +763,15 @@ def register(mcp: FastMCP):
         if project_bpm > 0:
             await client.execute("transport_set_bpm", bpm=project_bpm)
             bpm_set = True
+            target_bpm = float(project_bpm)
+        else:
+            info = await client.execute("project_get_info")
+            target_bpm = float(info.get("data", info).get("bpm") or 0.0)
+        if target_bpm <= 0:
+            raise ReaperMCPError(
+                ErrorCode.COMMAND_FAILED,
+                "Could not read the project tempo - pass project_bpm explicitly",
+            )
 
         tracks_result = await client.execute("track_get_all")
         data = tracks_result.get("data", tracks_result)
@@ -691,6 +821,15 @@ def register(mcp: FastMCP):
                     "error": f"File not found: {file_path}",
                 })
                 continue
+            # Before any track is created, so a malformed override can't
+            # leave an empty track behind.
+            try:
+                tempo = _plan_tempo_match(
+                    entry, os.path.basename(file_path), target_bpm, match_tempo,
+                )
+            except ValueError as e:
+                errors.append({"index": i, "track_name": track_name, "error": str(e)})
+                continue
 
             if track_name in existing:
                 track_idx = existing[track_name]
@@ -709,18 +848,29 @@ def register(mcp: FastMCP):
                 existing[track_name] = track_idx
                 created.append(track_name)
 
+            insert_params = {
+                "track_index": track_idx,
+                "path": file_path,
+                "position": position_sec,
+            }
+            if tempo["playrate"] is not None:
+                insert_params["playrate"] = tempo["playrate"]
+                insert_params["preserve_pitch"] = True
             try:
-                await client.execute(
-                    "item_insert_media",
-                    track_index=track_idx,
-                    path=file_path,
-                    position=position_sec,
-                )
+                result = await client.execute("item_insert_media", **insert_params)
+                item_data = result.get("data", result)
                 loaded.append({
                     "track_name": track_name,
                     "track_index": track_idx,
                     "file": os.path.basename(file_path),
                     "position_sec": position_sec,
+                    "item_index": item_data.get("index"),
+                    "length_sec": item_data.get("length"),
+                    "source_bpm": tempo["source_bpm"],
+                    "bpm_from": tempo["bpm_from"],
+                    "playrate": item_data.get("playrate"),
+                    "playrate_requested": tempo["playrate"],
+                    "tempo_skipped": tempo["skipped"],
                 })
             except Exception as e:
                 errors.append({
@@ -728,6 +878,9 @@ def register(mcp: FastMCP):
                     "track_name": track_name,
                     "error": f"item_insert_media failed: {e}",
                 })
+
+        tempo_warnings = _tempo_warnings(loaded)
+        tempo_matched = sum(1 for l in loaded if l["playrate_requested"] is not None)
 
         if errors and not loaded:
             hint = f"All {len(loop_list)} entries failed. First error: {errors[0].get('error')}"
@@ -745,10 +898,17 @@ def register(mcp: FastMCP):
             )
         else:
             hint = "No loops loaded and no errors — loops array was empty?"
+        if tempo_matched:
+            hint += f" {tempo_matched} loop(s) stretched to {target_bpm:g} BPM."
+        if tempo_warnings:
+            hint += f" {len(tempo_warnings)} tempo warning(s) - see `tempo_warnings`."
 
         return {
             "project_bpm_set": bpm_set,
             "project_bpm": project_bpm if bpm_set else None,
+            "tempo_target_bpm": target_bpm,
+            "loops_tempo_matched": tempo_matched,
+            "tempo_warnings": tempo_warnings,
             "tracks_created": created,
             "tracks_reused": [l["track_name"] for l in loaded if l["track_name"] not in created],
             "loops_loaded": len(loaded),

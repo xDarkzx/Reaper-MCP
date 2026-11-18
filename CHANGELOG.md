@@ -9,7 +9,24 @@ All notable changes to ReaperMCP will be documented in this file.
 - `envelope_get_points`, `envelope_add_points` and `envelope_clear_range`
   accept `track_index=-1` for the master track, the same convention the fx
   tools use. This lets you automate the master volume (e.g. a fade-out) and
-  pan, or add a master Mute envelope. Numbered tracks behave as before.
+  pan. Numbered tracks behave as before.
+- `load_loops` tempo-matches loops to the project (on by default). A loop's
+  BPM comes from the entry's `source_bpm` or its filename; half or double
+  time is used when closer, pitch is preserved, and the item is resized so
+  the whole loop plays. One-shots with no BPM are inserted untouched, and
+  `match_tempo` turns it off per call or per entry. Large stretches are
+  listed in `tempo_warnings`.
+
+### Fixed
+
+- `item_insert_media` no longer goes through REAPER's import routine, which
+  could stop on an "embedded tempo information" prompt for ACID-tagged
+  loops and block the bridge until someone answered it in REAPER. It also
+  returns the item it actually inserted, with its real index, instead of
+  the track's last item.
+- Asking for a Mute envelope on the master track, which REAPER doesn't
+  create, now says so and points to the master Volume envelope instead of
+  a bare "could not be created".
 
 ## [0.8.3] - 2026-10-26
 

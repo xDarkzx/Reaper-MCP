@@ -243,6 +243,18 @@ def test_numbered_tracks_still_resolve_as_before():
     assert rt.eval("state.resolved_track") == "TR"
 
 
+def test_master_mute_that_cannot_be_created_points_to_volume():
+    rt = _runtime()
+    fn = rt.eval("""function()
+      local r, err = envelope.envelope_add_points({track_index = -1, envelope_name = "Mute",
+        create = true, points = {{time = 1.0, value = 1}}})
+      return err
+    end""")
+    err = fn()
+    assert "on the master track" in err
+    assert "Volume envelope" in err
+
+
 def test_an_unknown_track_index_reports_track_not_found():
     rt = _runtime()
     fn = rt.eval("""function()
